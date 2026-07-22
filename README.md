@@ -1,4 +1,6 @@
-# AIHR Analytics
+# AI-Hiring-Monitor
+
+AIHR Analytics
 
 AI 招聘推荐效果评估与模型监控系统，用于比较 AI 与人工推荐的招聘漏斗表现，并逐步扩展选择偏差调整、队列分析和数据漂移监控。
 
