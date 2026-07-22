@@ -1,0 +1,13 @@
+.git
+.venv
+venv
+__pycache__
+.pytest_cache
+.ruff_cache
+data/private
+data/company
+data/raw
+exports
+*.db
+*.dump
+
