@@ -6,7 +6,7 @@ AI 招聘推荐效果评估与模型监控系统，用于比较 AI 与人工推�
 
 当前版本是可运行的工程骨架，公开演示使用固定随机种子生成的合成指标数据，不包含任何真实候选人信息或前公司数据。
 
-完整的项目背景、业务问题、数据模型、分析方法和面试讲解见：[项目简介与设计](项目简介与设计.md)。
+完整的项目背景、业务问题、数据模型、分析方法和面试讲解见：[项目简介与设计](docs/项目简介与设计.md)。
 
 ## 当前功能
 
@@ -37,7 +37,6 @@ mart_daily_funnel
 ## Docker 启动
 
 ```powershell
-Copy-Item .env.example .env
 docker compose up --build
 ```
 
@@ -80,6 +79,14 @@ streamlit run app/Home.py
 
 默认本地模式使用项目目录下的 SQLite；Docker 模式使用 MySQL。
 
+配置文件统一放在 `config/` 目录：
+
+- `config/config.ini`: 默认/最终环境配置。
+- `config/config.Test.ini`: 测试环境配置。
+- `config/config.Online.ini`: 生产环境配置。
+
+运行时默认读取 `config/config.ini`，也可以通过 `AIHR_CONFIG_FILE` 指定配置文件；`AIHR_` 前缀环境变量仍可用于临时覆盖同名配置项。
+
 ## 测试
 
 ```powershell
@@ -92,4 +99,4 @@ ruff check .
 - `data_origin=synthetic` 表示公开演示用合成数据。
 - 前公司或候选人数据不得提交到仓库。
 - 经授权真实数据应通过私有适配层接入，公开 Demo 继续使用合成数据。
-- 完整数据边界见 `数据流设计.md`，完整需求见 `需求.md`。
+- 完整数据边界见 `docs/数据流设计.md`，完整需求见 `docs/需求.md`。

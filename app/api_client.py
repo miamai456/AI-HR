@@ -1,10 +1,11 @@
-import os
 from datetime import date
 from typing import Any
 
 import requests
 
-API_URL = os.getenv("AIHR_API_URL", "http://localhost:8000/api/v1").rstrip("/")
+from aihr.config import get_settings
+
+API_URL = get_settings().api_url.rstrip("/")
 
 
 class ApiError(RuntimeError):
