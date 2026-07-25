@@ -2,10 +2,10 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE:?Copy .env.example to .env first}
-      MYSQL_USER: ${MYSQL_USER:?Copy .env.example to .env first}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Copy .env.example to .env first}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Copy .env.example to .env first}
+      MYSQL_DATABASE: aihr
+      MYSQL_USER: aihr
+      MYSQL_PASSWORD: CHANGE_ME
+      MYSQL_ROOT_PASSWORD: CHANGE_ME
     ports:
       - "3307:3306"
     volumes:
@@ -21,8 +21,7 @@ services:
       context: .
       dockerfile: Dockerfile.api
     environment:
-      AIHR_ENVIRONMENT: docker
-      AIHR_DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}?charset=utf8mb4
+      AIHR_CONFIG_FILE: config/config.Online.ini
       AIHR_SEED_DEMO_DATA: "true"
     ports:
       - "8000:8000"
@@ -40,6 +39,7 @@ services:
       context: .
       dockerfile: Dockerfile.app
     environment:
+      AIHR_CONFIG_FILE: config/config.Online.ini
       AIHR_API_URL: http://api:8000/api/v1
     ports:
       - "8501:8501"

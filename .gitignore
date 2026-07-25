@@ -7,6 +7,8 @@ __pycache__/
 .coverage
 htmlcov/
 .env
+config/*.local.ini
+config/*.secret.ini
 aihr.db
 data/private/
 data/company/
