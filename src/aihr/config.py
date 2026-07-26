@@ -23,6 +23,10 @@ class Settings(BaseModel):
     mysql_user: str = "aihr"
     mysql_password: str = "local_demo_password"
     mysql_root_password: str = "local_demo_root_password"
+    synthetic_seed_recommendations: int = 100_000
+    synthetic_seed_candidates: int = 80_000
+    synthetic_seed_jobs: int = 1_500
+    synthetic_seed: int = 20260722
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -43,6 +47,10 @@ SECTION_KEY_ALIASES = {
     ("mysql", "user"): "mysql_user",
     ("mysql", "password"): "mysql_password",
     ("mysql", "root_password"): "mysql_root_password",
+    ("synthetic", "seed_recommendations"): "synthetic_seed_recommendations",
+    ("synthetic", "seed_candidates"): "synthetic_seed_candidates",
+    ("synthetic", "seed_jobs"): "synthetic_seed_jobs",
+    ("synthetic", "seed"): "synthetic_seed",
 }
 
 

@@ -6,6 +6,7 @@ from app.api_client import ApiError, get_filters
 
 SOURCE_LABELS = {"ai": "AI 推荐", "human": "人工推荐"}
 SOURCE_COLORS = {"ai": "#2563EB", "human": "#E76F51"}
+ALL_OPTION = "全部"
 
 
 def configure_page(title: str) -> None:
@@ -31,7 +32,7 @@ def load_filter_options() -> dict:
     return get_filters()
 
 
-def render_filters() -> tuple[list[date], str, str, str]:
+def render_filters() -> tuple[list[date], str, str, str, str, str]:
     try:
         options = load_filter_options()
     except ApiError as exc:
@@ -45,11 +46,13 @@ def render_filters() -> tuple[list[date], str, str, str]:
         min_value=date.fromisoformat(options["date_min"]),
         max_value=date.fromisoformat(options["date_max"]),
     )
-    source = st.sidebar.selectbox("推荐来源", ["全部", *options["sources"]])
-    job_category = st.sidebar.selectbox("岗位类别", ["全部", *options["job_categories"]])
-    region = st.sidebar.selectbox("地区", ["全部", *options["regions"]])
+    source = st.sidebar.selectbox("推荐来源", [ALL_OPTION, *options["sources"]])
+    job_category = st.sidebar.selectbox("岗位", [ALL_OPTION, *options["job_categories"]])
+    region = st.sidebar.selectbox("地区", [ALL_OPTION, *options["regions"]])
+    model_version = st.sidebar.selectbox("模型版本", [ALL_OPTION, *options["model_versions"]])
+    recruiter_team = st.sidebar.selectbox("顾问团队", [ALL_OPTION, *options["recruiter_teams"]])
     st.sidebar.caption("当前公开演示使用固定种子的合成招聘事件。")
-    return list(date_range), source, job_category, region
+    return list(date_range), source, job_category, region, model_version, recruiter_team
 
 
 def format_percent(value: float) -> str:

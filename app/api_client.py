@@ -37,6 +37,10 @@ def get_monitoring() -> dict:
     return _get("/monitoring")
 
 
+def get_monitoring_with_filters(params: dict[str, Any]) -> dict:
+    return _get("/monitoring", params=params)
+
+
 def get_effectiveness(params: dict[str, Any]) -> dict:
     return _get("/effectiveness/unadjusted", params=params)
 
@@ -46,6 +50,8 @@ def build_query(
     source: str,
     job_category: str,
     region: str,
+    model_version: str = "全部",
+    recruiter_team: str = "全部",
 ) -> dict[str, str]:
     params = {
         "start_date": date_range[0].isoformat(),
@@ -57,4 +63,8 @@ def build_query(
         params["job_category"] = job_category
     if region != "全部":
         params["region"] = region
+    if model_version != "全部":
+        params["model_version"] = model_version
+    if recruiter_team != "全部":
+        params["recruiter_team"] = recruiter_team
     return params

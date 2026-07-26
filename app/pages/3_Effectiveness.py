@@ -9,21 +9,21 @@ configure_page("AI 推荐效果评估")
 st.title("AI 推荐效果评估")
 st.warning("当前为未调整的观察性差异，不能直接解释为 AI 推荐造成的因果效果。")
 
-date_range, _, job_category, region = render_filters()
+date_range, source, job_category, region, model_version, recruiter_team = render_filters()
 if len(date_range) != 2:
     st.warning("请选择完整的开始和结束日期。")
     st.stop()
 
 try:
-    params = build_query(date_range, "全部", job_category, region)
+    params = build_query(date_range, source, job_category, region, model_version, recruiter_team)
     result = get_effectiveness(params)
 except ApiError as exc:
     st.error(str(exc))
     st.stop()
 
 columns = st.columns(4)
-columns[0].metric("AI 累计面试率", f"{result['ai_rate']:.2%}")
-columns[1].metric("人工累计面试率", f"{result['human_rate']:.2%}")
+columns[0].metric("AI 面试率", f"{result['ai_rate']:.2%}")
+columns[1].metric("人工面试率", f"{result['human_rate']:.2%}")
 columns[2].metric("原始差异", f"{result['difference'] * 100:+.2f} 个百分点")
 columns[3].metric(
     "95% 置信区间",
@@ -44,7 +44,7 @@ figure = go.Figure(
         y=source_df["面试率"],
         marker_color=[SOURCE_COLORS["ai"], SOURCE_COLORS["human"]],
         customdata=source_df[["样本量"]],
-        hovertemplate=("%{x}<br>累计面试率：%{y:.2%}<br>样本量：%{customdata[0]:,}<extra></extra>"),
+        hovertemplate="%{x}<br>面试率：%{y:.2%}<br>样本量：%{customdata[0]:,}<extra></extra>",
     )
 )
 figure.update_yaxes(tickformat=".1%", rangemode="tozero")

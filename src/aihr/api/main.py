@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import Session
 
 from aihr.config import get_settings
@@ -18,7 +19,7 @@ from aihr.schemas import (
     MonitoringResponse,
     OverviewResponse,
 )
-from aihr.seed import seed_demo_metrics
+from aihr.seed import SyntheticHiringConfig, seed_demo_metrics
 from aihr.services.analytics import (
     get_effectiveness,
     get_filter_options,
@@ -28,6 +29,10 @@ from aihr.services.analytics import (
 )
 
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+def database_backend_for_url(database_url: str) -> str:
+    return make_url(database_url).get_backend_name()
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
@@ -40,7 +45,15 @@ def create_app(database_url: str | None = None) -> FastAPI:
         Base.metadata.create_all(engine)
         if settings.seed_demo_data:
             with session_factory() as session:
-                seed_demo_metrics(session)
+                seed_demo_metrics(
+                    session,
+                    config=SyntheticHiringConfig(
+                        seed=settings.synthetic_seed,
+                        n_candidates=settings.synthetic_seed_candidates,
+                        n_jobs=settings.synthetic_seed_jobs,
+                        n_recommendations=settings.synthetic_seed_recommendations,
+                    ),
+                )
         yield
         engine.dispose()
 
@@ -71,9 +84,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "app": settings.app_name,
             "environment": settings.environment,
             "database": "ok",
-            "database_backend": (
-                "mysql" if resolved_database_url.startswith("mysql") else "sqlite"
-            ),
+            "database_backend": database_backend_for_url(resolved_database_url),
         }
 
     @application.get("/api/v1/meta/filters", response_model=FilterOptions, tags=["analytics"])
@@ -88,6 +99,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         source: str | None = Query(default=None, pattern="^(ai|human)$"),
         job_category: str | None = None,
         region: str | None = None,
+        model_version: str | None = None,
+        recruiter_team: str | None = None,
     ) -> dict:
         return get_overview(
             session,
@@ -96,6 +109,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
             source=source,
             job_category=job_category,
             region=region,
+            model_version=model_version,
+            recruiter_team=recruiter_team,
         )
 
     @application.get("/api/v1/funnel", response_model=list[FunnelRow], tags=["analytics"])
@@ -106,6 +121,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         source: str | None = Query(default=None, pattern="^(ai|human)$"),
         job_category: str | None = None,
         region: str | None = None,
+        model_version: str | None = None,
+        recruiter_team: str | None = None,
     ) -> list[dict]:
         return get_funnel(
             session,
@@ -114,6 +131,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
             source=source,
             job_category=job_category,
             region=region,
+            model_version=model_version,
+            recruiter_team=recruiter_team,
         )
 
     @application.get(
@@ -121,8 +140,26 @@ def create_app(database_url: str | None = None) -> FastAPI:
         response_model=MonitoringResponse,
         tags=["analytics"],
     )
-    def monitoring(session: DbSession) -> dict:
-        return get_monitoring(session)
+    def monitoring(
+        session: DbSession,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        source: str | None = Query(default=None, pattern="^(ai|human)$"),
+        job_category: str | None = None,
+        region: str | None = None,
+        model_version: str | None = None,
+        recruiter_team: str | None = None,
+    ) -> dict:
+        return get_monitoring(
+            session,
+            start_date=start_date,
+            end_date=end_date,
+            source=source,
+            job_category=job_category,
+            region=region,
+            model_version=model_version,
+            recruiter_team=recruiter_team,
+        )
 
     @application.get(
         "/api/v1/effectiveness/unadjusted",
@@ -133,15 +170,21 @@ def create_app(database_url: str | None = None) -> FastAPI:
         session: DbSession,
         start_date: date | None = None,
         end_date: date | None = None,
+        source: str | None = Query(default=None, pattern="^(ai|human)$"),
         job_category: str | None = None,
         region: str | None = None,
+        model_version: str | None = None,
+        recruiter_team: str | None = None,
     ) -> dict:
         return get_effectiveness(
             session,
             start_date=start_date,
             end_date=end_date,
+            source=source,
             job_category=job_category,
             region=region,
+            model_version=model_version,
+            recruiter_team=recruiter_team,
         )
 
     return application

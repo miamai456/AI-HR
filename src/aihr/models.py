@@ -94,6 +94,8 @@ class DailyFunnelMetric(Base):
             "source",
             "job_category",
             "region",
+            "metric_name",
+            "metric_version",
             name="uq_daily_funnel_segment",
         ),
     )
@@ -103,11 +105,141 @@ class DailyFunnelMetric(Base):
     source: Mapped[str] = mapped_column(String(16), index=True)
     job_category: Mapped[str] = mapped_column(String(32), index=True)
     region: Mapped[str] = mapped_column(String(32), index=True)
+    metric_name: Mapped[str] = mapped_column(String(64), default="daily_interview_rate", index=True)
+    numerator: Mapped[int] = mapped_column(Integer, default=0)
+    denominator: Mapped[int] = mapped_column(Integer, default=0)
+    rate: Mapped[float] = mapped_column(Float, default=0.0)
+    sample_size: Mapped[int] = mapped_column(Integer, default=0)
+    period_start: Mapped[date] = mapped_column(Date, index=True)
+    period_end: Mapped[date] = mapped_column(Date, index=True)
     recommended: Mapped[int] = mapped_column(Integer)
     contacted: Mapped[int] = mapped_column(Integer)
     replied: Mapped[int] = mapped_column(Integer)
     interviewed: Mapped[int] = mapped_column(Integer)
     offered: Mapped[int] = mapped_column(Integer)
     hired: Mapped[int] = mapped_column(Integer)
-    data_origin: Mapped[str] = mapped_column(String(16), default="synthetic")
+    data_origin: Mapped[str] = mapped_column(String(32), default="synthetic")
+    metric_version: Mapped[str] = mapped_column(String(32), default="v1", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class CohortConversionMetric(Base):
+    __tablename__ = "mart_cohort_conversion"
+    __table_args__ = (
+        UniqueConstraint(
+            "cohort_month",
+            "source",
+            "job_category",
+            "region",
+            "metric_name",
+            "metric_version",
+            name="uq_cohort_conversion_segment_metric",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cohort_month: Mapped[date] = mapped_column(Date, index=True)
+    source: Mapped[str] = mapped_column(String(16), index=True)
+    job_category: Mapped[str] = mapped_column(String(32), index=True)
+    region: Mapped[str] = mapped_column(String(32), index=True)
+    metric_name: Mapped[str] = mapped_column(String(64), index=True)
+    numerator: Mapped[int] = mapped_column(Integer)
+    denominator: Mapped[int] = mapped_column(Integer)
+    rate: Mapped[float] = mapped_column(Float)
+    sample_size: Mapped[int] = mapped_column(Integer)
+    period_start: Mapped[date] = mapped_column(Date, index=True)
+    period_end: Mapped[date] = mapped_column(Date, index=True)
+    data_origin: Mapped[str] = mapped_column(String(32), default="synthetic_event_rollup")
+    metric_version: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AiEffectivenessMetric(Base):
+    __tablename__ = "mart_ai_effectiveness"
+    __table_args__ = (
+        UniqueConstraint(
+            "period_start",
+            "period_end",
+            "job_category",
+            "region",
+            "metric_name",
+            "metric_version",
+            name="uq_ai_effectiveness_segment_metric",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_category: Mapped[str] = mapped_column(String(32), index=True)
+    region: Mapped[str] = mapped_column(String(32), index=True)
+    metric_name: Mapped[str] = mapped_column(String(64), index=True)
+    numerator: Mapped[int] = mapped_column(Integer)
+    denominator: Mapped[int] = mapped_column(Integer)
+    rate: Mapped[float] = mapped_column(Float)
+    sample_size: Mapped[int] = mapped_column(Integer)
+    comparison_numerator: Mapped[int] = mapped_column(Integer)
+    comparison_denominator: Mapped[int] = mapped_column(Integer)
+    comparison_rate: Mapped[float] = mapped_column(Float)
+    effect_size: Mapped[float] = mapped_column(Float)
+    period_start: Mapped[date] = mapped_column(Date, index=True)
+    period_end: Mapped[date] = mapped_column(Date, index=True)
+    data_origin: Mapped[str] = mapped_column(String(32), default="synthetic_event_rollup")
+    metric_version: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class FeatureDriftMetric(Base):
+    __tablename__ = "mart_feature_drift"
+    __table_args__ = (
+        UniqueConstraint(
+            "feature_name",
+            "segment",
+            "period_start",
+            "period_end",
+            "metric_version",
+            name="uq_feature_drift_metric",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feature_name: Mapped[str] = mapped_column(String(64), index=True)
+    segment: Mapped[str] = mapped_column(String(64), index=True)
+    metric_name: Mapped[str] = mapped_column(String(64), index=True)
+    numerator: Mapped[int] = mapped_column(Integer)
+    denominator: Mapped[int] = mapped_column(Integer)
+    rate: Mapped[float] = mapped_column(Float)
+    sample_size: Mapped[int] = mapped_column(Integer)
+    baseline_rate: Mapped[float] = mapped_column(Float)
+    current_rate: Mapped[float] = mapped_column(Float)
+    drift_score: Mapped[float] = mapped_column(Float)
+    period_start: Mapped[date] = mapped_column(Date, index=True)
+    period_end: Mapped[date] = mapped_column(Date, index=True)
+    data_origin: Mapped[str] = mapped_column(String(32), default="synthetic_event_rollup")
+    metric_version: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class MonitoringAlert(Base):
+    __tablename__ = "mart_monitoring_alert"
+    __table_args__ = (
+        UniqueConstraint(
+            "alert_key",
+            "metric_version",
+            name="uq_monitoring_alert_key_version",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    alert_key: Mapped[str] = mapped_column(String(128), index=True)
+    severity: Mapped[str] = mapped_column(String(16), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)
+    metric_name: Mapped[str] = mapped_column(String(64), index=True)
+    numerator: Mapped[int] = mapped_column(Integer)
+    denominator: Mapped[int] = mapped_column(Integer)
+    rate: Mapped[float] = mapped_column(Float)
+    sample_size: Mapped[int] = mapped_column(Integer)
+    evidence: Mapped[str] = mapped_column(String(512))
+    period_start: Mapped[date] = mapped_column(Date, index=True)
+    period_end: Mapped[date] = mapped_column(Date, index=True)
+    data_origin: Mapped[str] = mapped_column(String(32), default="synthetic_event_rollup")
+    metric_version: Mapped[str] = mapped_column(String(32), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

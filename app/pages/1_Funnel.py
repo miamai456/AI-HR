@@ -9,13 +9,15 @@ configure_page("招聘漏斗")
 st.title("招聘漏斗")
 st.caption("同时比较 AI 与人工推荐在各阶段的数量损耗。")
 
-date_range, source, job_category, region = render_filters()
+date_range, source, job_category, region, model_version, recruiter_team = render_filters()
 if len(date_range) != 2:
     st.warning("请选择完整的开始和结束日期。")
     st.stop()
 
 try:
-    rows = get_funnel(build_query(date_range, source, job_category, region))
+    rows = get_funnel(
+        build_query(date_range, source, job_category, region, model_version, recruiter_team)
+    )
 except ApiError as exc:
     st.error(str(exc))
     st.stop()

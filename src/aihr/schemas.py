@@ -18,23 +18,36 @@ class SummaryMetrics(BaseModel):
     interviewed: int
     offered: int
     hired: int
+    ai_share: float = Field(ge=0, le=1)
     contact_rate: float = Field(ge=0, le=1)
     interview_rate: float = Field(ge=0, le=1)
+    qualified_interview_30d_rate: float = Field(ge=0, le=1)
     offer_rate: float = Field(ge=0, le=1)
     hire_rate: float = Field(ge=0, le=1)
+    mature_queue_hire_rate: float = Field(ge=0, le=1)
 
 
 class TrendPoint(BaseModel):
-    metric_date: date
+    period: str
     source: str
     recommended: int
     interview_rate: float
     hire_rate: float
 
 
+class OpenAlert(BaseModel):
+    alert_key: str
+    severity: str
+    metric_name: str
+    evidence: str
+    period_start: date
+    period_end: date
+
+
 class OverviewResponse(BaseModel):
     summary: SummaryMetrics
     trend: list[TrendPoint]
+    open_alerts: list[OpenAlert]
     data_origin: str
 
 
@@ -54,6 +67,8 @@ class FilterOptions(BaseModel):
     sources: list[str]
     job_categories: list[str]
     regions: list[str]
+    model_versions: list[str]
+    recruiter_teams: list[str]
 
 
 class MonitoringRow(BaseModel):
