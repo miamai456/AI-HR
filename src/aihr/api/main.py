@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from aihr.config import get_settings
 from aihr.database import Base, create_engine_and_session, get_db
 from aihr.schemas import (
+    DataQualityResponse,
     EffectivenessResponse,
     FilterOptions,
     FunnelRow,
@@ -21,6 +22,7 @@ from aihr.schemas import (
 )
 from aihr.seed import SyntheticHiringConfig, seed_demo_metrics
 from aihr.services.analytics import (
+    get_data_quality,
     get_effectiveness,
     get_filter_options,
     get_funnel,
@@ -160,6 +162,33 @@ def create_app(database_url: str | None = None) -> FastAPI:
             model_version=model_version,
             recruiter_team=recruiter_team,
         )
+
+    @application.get(
+        "/api/v1/data-quality",
+        response_model=DataQualityResponse,
+        tags=["analytics"],
+    )
+    def data_quality(
+        session: DbSession,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        source: str | None = Query(default=None, pattern="^(ai|human)$"),
+        job_category: str | None = None,
+        region: str | None = None,
+        model_version: str | None = None,
+        recruiter_team: str | None = None,
+    ) -> dict:
+        return get_data_quality(
+            session,
+            start_date=start_date,
+            end_date=end_date,
+            source=source,
+            job_category=job_category,
+            region=region,
+            model_version=model_version,
+            recruiter_team=recruiter_team,
+        )
+
 
     @application.get(
         "/api/v1/effectiveness/unadjusted",

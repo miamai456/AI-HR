@@ -2,11 +2,10 @@ from datetime import date
 
 import streamlit as st
 
-from app.api_client import ApiError, get_filters
+from app.api_client import ALL_OPTION, ApiError, get_filters
 
 SOURCE_LABELS = {"ai": "AI 推荐", "human": "人工推荐"}
 SOURCE_COLORS = {"ai": "#2563EB", "human": "#E76F51"}
-ALL_OPTION = "全部"
 
 
 def configure_page(title: str) -> None:

@@ -50,7 +50,7 @@ def test_overview_supports_unified_filters_and_executive_metrics() -> None:
         assert 0 <= summary["ai_share"] <= 1
         assert 0 <= summary["qualified_interview_30d_rate"] <= 1
         assert 0 <= summary["mature_queue_hire_rate"] <= 1
-        assert len({point["period"] for point in payload["trend"]}) <= 12
+        assert len({point["period"] for point in payload["trend"]}) == 12
         assert "open_alerts" in payload
 
         monitoring = client.get("/api/v1/monitoring", params=params)
@@ -58,6 +58,10 @@ def test_overview_supports_unified_filters_and_executive_metrics() -> None:
 
         effectiveness = client.get("/api/v1/effectiveness/unadjusted", params=params)
         assert effectiveness.status_code == 200
+
+        data_quality = client.get("/api/v1/data-quality", params=params)
+        assert data_quality.status_code == 200
+        assert data_quality.json()["checks"]
 
 
 def test_unadjusted_effectiveness() -> None:
@@ -69,6 +73,40 @@ def test_unadjusted_effectiveness() -> None:
         assert payload["human_sample_size"] > 0
         assert payload["confidence_interval_low"] <= payload["difference"]
         assert payload["difference"] <= payload["confidence_interval_high"]
+
+
+def test_effectiveness_reports_observational_adjustment_diagnostics() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/effectiveness/unadjusted")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["analysis_type"] == "observational_adjusted_association"
+    assert payload["causal_claim"] is False
+    assert payload["limitation_note"]
+    assert payload["proportion_difference"] == payload["difference"]
+    assert payload["adjusted_ai_rate"] is not None
+    assert payload["adjusted_human_rate"] is not None
+    assert payload["adjusted_difference"] is not None
+    assert payload["propensity_method"] == "logistic_regression_iptw"
+    assert payload["weighting_method"] == "stabilized_iptw"
+    assert payload["extreme_weight_handling"]["method"] == "clip"
+    assert payload["extreme_weight_handling"]["max_weight_after"] <= 10
+    assert payload["common_support"]["has_overlap"] is True
+    assert payload["common_support"]["retained_sample_size"] > 0
+    assert payload["balance_diagnostics"]
+    for row in payload["balance_diagnostics"]:
+        assert {"covariate", "smd_before", "smd_after"} <= set(row)
+
+
+def test_effectiveness_keeps_ai_and_human_comparison_when_source_filter_is_present() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/effectiveness/unadjusted", params={"source": "ai"})
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["ai_sample_size"] > 0
+    assert payload["human_sample_size"] > 0
 
 
 def test_funnel_is_monotonic() -> None:
@@ -85,3 +123,122 @@ def test_funnel_is_monotonic() -> None:
                 row["hired"],
             ]
             assert values == sorted(values, reverse=True)
+
+
+def test_monitoring_reports_model_version_trends_and_drift_diagnostics() -> None:
+    with TestClient(app) as client:
+        filters = client.get("/api/v1/meta/filters").json()
+        params = {
+            "model_version": filters["model_versions"][0],
+            "job_category": filters["job_categories"][0],
+            "region": filters["regions"][0],
+        }
+        response = client.get("/api/v1/monitoring", params=params)
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["baseline_start"] <= payload["baseline_end"]
+    assert payload["current_start"] <= payload["current_end"]
+    assert payload["thresholds"]["psi"]["medium"] == 0.1
+    assert payload["thresholds"]["jsd"]["high"] == 0.2
+    assert payload["model_version_trends"]
+    assert payload["drift_metrics"]
+
+    trend = payload["model_version_trends"][0]
+    assert {
+        "period",
+        "model_version",
+        "job_category",
+        "region",
+        "recommendations",
+        "traffic_share",
+        "interview_rate",
+    } <= set(trend)
+    assert trend["model_version"] == params["model_version"]
+    assert trend["job_category"] == params["job_category"]
+    assert trend["region"] == params["region"]
+
+    metric_types = {metric["metric_type"] for metric in payload["drift_metrics"]}
+    assert {"psi", "jsd", "score_drift"} <= metric_types
+    for metric in payload["drift_metrics"]:
+        assert metric["severity"] in {"normal", "medium", "high"}
+        assert metric["threshold_medium"] <= metric["threshold_high"]
+        assert metric["baseline_sample_size"] >= 0
+        assert metric["current_sample_size"] >= 0
+
+
+def test_monitoring_reports_alert_and_anomaly_diagnostic_conclusions() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/monitoring")
+        assert response.status_code == 200
+        payload = response.json()
+
+    conclusions = payload["diagnostic_conclusions"]
+    assert conclusions
+    categories = {row["category"] for row in conclusions}
+    assert categories <= {
+        "data_issue",
+        "traffic_structure",
+        "model",
+        "recruiter_operation",
+        "hiring_process",
+    }
+    assert "recruiter_operation" in categories
+    assert {"effect_drop", "data_anomaly"} <= {row["conclusion_type"] for row in conclusions}
+
+    for conclusion in conclusions:
+        assert conclusion["severity"] in {"normal", "medium", "high"}
+        assert conclusion["evidence_metric"]
+        assert conclusion["baseline_value"] is not None
+        assert conclusion["current_value"] is not None
+        assert conclusion["period_start"] <= conclusion["period_end"]
+        assert conclusion["baseline_sample_size"] >= 0
+        assert conclusion["current_sample_size"] >= 0
+        assert conclusion["sample_size"] == (
+            conclusion["baseline_sample_size"] + conclusion["current_sample_size"]
+        )
+        breakdown = conclusion["breakdown"]
+        assert {"job_category", "region", "recruiter_team", "model_version"} <= set(breakdown)
+
+
+def test_data_quality_reports_structured_layer_freshness_and_checks() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/data-quality")
+        assert response.status_code == 200
+        payload = response.json()
+
+    layers = payload["layers"]
+    assert layers
+    assert {"dim_candidate", "fact_recommendation", "fact_funnel_event"} <= {
+        layer["layer_name"] for layer in layers
+    }
+    for layer in layers:
+        assert layer["record_count"] >= 0
+        assert layer["last_updated_at"] is None or "T" in layer["last_updated_at"]
+
+    expected_check_types = {
+        "duplicate_primary_key",
+        "missing_critical_field",
+        "orphan_event",
+        "illegal_event_order",
+        "future_timestamp",
+        "negative_duration",
+        "invalid_enum",
+        "data_latency",
+        "queue_maturity",
+    }
+    checks = payload["checks"]
+    assert expected_check_types <= {check["check_type"] for check in checks}
+    assert payload["summary"]["total_checks"] == len(checks)
+    assert payload["summary"]["failed_checks"] == sum(
+        1 for check in checks if check["status"] == "fail"
+    )
+
+    for check in checks:
+        assert check["status"] in {"pass", "warn", "fail"}
+        assert check["severity"] in {"normal", "medium", "high"}
+        assert check["evidence_metric"]
+        assert check["affected_count"] >= 0
+        assert check["sample_size"] >= check["affected_count"]
+        assert check["period_start"] <= check["period_end"]
+        assert isinstance(check["details"], dict)

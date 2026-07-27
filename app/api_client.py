@@ -6,6 +6,7 @@ import requests
 from aihr.config import get_settings
 
 API_URL = get_settings().api_url.rstrip("/")
+ALL_OPTION = "全部"
 
 
 class ApiError(RuntimeError):
@@ -45,26 +46,30 @@ def get_effectiveness(params: dict[str, Any]) -> dict:
     return _get("/effectiveness/unadjusted", params=params)
 
 
+def get_data_quality(params: dict[str, Any] | None = None) -> dict:
+    return _get("/data-quality", params=params)
+
+
 def build_query(
     date_range: tuple[date, date] | list[date],
     source: str,
     job_category: str,
     region: str,
-    model_version: str = "全部",
-    recruiter_team: str = "全部",
+    model_version: str = ALL_OPTION,
+    recruiter_team: str = ALL_OPTION,
 ) -> dict[str, str]:
     params = {
         "start_date": date_range[0].isoformat(),
         "end_date": date_range[-1].isoformat(),
     }
-    if source != "全部":
+    if source != ALL_OPTION:
         params["source"] = source
-    if job_category != "全部":
+    if job_category != ALL_OPTION:
         params["job_category"] = job_category
-    if region != "全部":
+    if region != ALL_OPTION:
         params["region"] = region
-    if model_version != "全部":
+    if model_version != ALL_OPTION:
         params["model_version"] = model_version
-    if recruiter_team != "全部":
+    if recruiter_team != ALL_OPTION:
         params["recruiter_team"] = recruiter_team
     return params

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -79,21 +79,151 @@ class MonitoringRow(BaseModel):
     severity: str
 
 
+class MonitoringThresholdBand(BaseModel):
+    medium: float
+    high: float
+
+
+class MonitoringThresholds(BaseModel):
+    psi: MonitoringThresholdBand
+    jsd: MonitoringThresholdBand
+    score_drift: MonitoringThresholdBand
+
+
+class ModelVersionTrendPoint(BaseModel):
+    period: str
+    model_version: str
+    job_category: str
+    region: str
+    recommendations: int
+    traffic_share: float
+    interview_rate: float
+
+
+class DriftMetric(BaseModel):
+    metric_type: str
+    feature_name: str
+    baseline_value: float
+    current_value: float
+    drift_value: float
+    threshold_medium: float
+    threshold_high: float
+    severity: str
+    baseline_sample_size: int
+    current_sample_size: int
+
+
+class DiagnosticBreakdown(BaseModel):
+    job_category: str | None = None
+    region: str | None = None
+    recruiter_team: str | None = None
+    model_version: str | None = None
+
+
+class DiagnosticConclusion(BaseModel):
+    conclusion_type: str
+    category: str
+    severity: str
+    message: str
+    breakdown: DiagnosticBreakdown
+    evidence_metric: str
+    baseline_value: float
+    current_value: float
+    change_value: float
+    period_start: date
+    period_end: date
+    baseline_sample_size: int
+    current_sample_size: int
+    sample_size: int
+
+
 class MonitoringResponse(BaseModel):
     baseline_start: date
     baseline_end: date
     current_start: date
     current_end: date
     rows: list[MonitoringRow]
+    thresholds: MonitoringThresholds
+    model_version_trends: list[ModelVersionTrendPoint]
+    drift_metrics: list[DriftMetric]
+    diagnostic_conclusions: list[DiagnosticConclusion]
+
+
+class CommonSupportDiagnostics(BaseModel):
+    has_overlap: bool
+    lower_bound: float
+    upper_bound: float
+    retained_sample_size: int
+    original_sample_size: int
+
+
+class ExtremeWeightHandling(BaseModel):
+    method: str
+    lower_clip: float
+    upper_clip: float
+    max_weight_before: float
+    max_weight_after: float
+
+
+class BalanceDiagnostic(BaseModel):
+    covariate: str
+    smd_before: float
+    smd_after: float
 
 
 class EffectivenessResponse(BaseModel):
     metric: str
+    analysis_type: str
+    causal_claim: bool
+    limitation_note: str
     ai_rate: float = Field(ge=0, le=1)
     human_rate: float = Field(ge=0, le=1)
     difference: float
+    proportion_difference: float
     confidence_interval_low: float
     confidence_interval_high: float
     ai_sample_size: int
     human_sample_size: int
+    adjusted_ai_rate: float | None = Field(default=None, ge=0, le=1)
+    adjusted_human_rate: float | None = Field(default=None, ge=0, le=1)
+    adjusted_difference: float | None = None
+    propensity_method: str
+    weighting_method: str
+    common_support: CommonSupportDiagnostics
+    extreme_weight_handling: ExtremeWeightHandling
+    balance_diagnostics: list[BalanceDiagnostic]
+    data_origin: str
+
+
+class DataQualityLayer(BaseModel):
+    layer_name: str
+    layer_type: str
+    record_count: int
+    last_updated_at: datetime | None = None
+
+
+class DataQualityCheck(BaseModel):
+    check_type: str
+    check_name: str
+    status: str
+    severity: str
+    evidence_metric: str
+    affected_count: int
+    sample_size: int
+    period_start: date
+    period_end: date
+    details: dict
+
+
+class DataQualitySummary(BaseModel):
+    total_checks: int
+    failed_checks: int
+    warning_checks: int
+    generated_at: datetime
+
+
+class DataQualityResponse(BaseModel):
+    summary: DataQualitySummary
+    layers: list[DataQualityLayer]
+    checks: list[DataQualityCheck]
     data_origin: str

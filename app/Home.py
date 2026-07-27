@@ -7,7 +7,7 @@ from app.ui import SOURCE_COLORS, SOURCE_LABELS, configure_page, format_percent,
 
 configure_page("AIHR 总览")
 st.title("AIHR 推荐效果总览")
-st.caption("统一查看推荐量、AI 占比、触达、面试、Offer、入职和监控告警。")
+st.caption("统一查看推荐量、AI 占比、联系率、面试、Offer、入职和监控告警。")
 
 date_range, source, job_category, region, model_version, recruiter_team = render_filters()
 if len(date_range) != 2:
