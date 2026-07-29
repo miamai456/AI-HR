@@ -1,0 +1,82 @@
+﻿services:
+  superset:
+    image: apache/superset:latest
+    container_name: bi-superset
+    restart: unless-stopped
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    environment:
+      SUPERSET_SECRET_KEY: "change-this-secret-key-before-production-use"
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      DATABASE_DB: superset
+      DATABASE_HOST: superset-db
+      DATABASE_PASSWORD: superset
+      DATABASE_USER: superset
+      REDIS_HOST: superset-redis
+      REDIS_PORT: 6379
+    volumes:
+      - ./superset_config.py:/app/pythonpath/superset_config.py:ro
+      - superset_home:/app/superset_home
+    ports:
+      - "8088:8088"
+    command: >
+      /bin/sh -c "gunicorn --bind 0.0.0.0:8088 --workers 2 --timeout 120 'superset.app:create_app()'"
+
+  superset-init:
+    image: apache/superset:latest
+    container_name: bi-superset-init
+    depends_on:
+      superset-redis:
+        condition: service_healthy
+    environment:
+      SUPERSET_SECRET_KEY: "change-this-secret-key-before-production-use"
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      DATABASE_DB: superset
+      DATABASE_HOST: superset-db
+      DATABASE_PASSWORD: superset
+      DATABASE_USER: superset
+      REDIS_HOST: superset-redis
+      REDIS_PORT: 6379
+      ADMIN_USERNAME: admin
+      ADMIN_FIRSTNAME: Superset
+      ADMIN_LASTNAME: Admin
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: admin
+    volumes:
+      - ./superset_config.py:/app/pythonpath/superset_config.py:ro
+      - superset_home:/app/superset_home
+    command: >
+      /bin/sh -c "superset db upgrade &&
+      superset fab create-admin --username $$ADMIN_USERNAME --firstname $$ADMIN_FIRSTNAME --lastname $$ADMIN_LASTNAME --email $$ADMIN_EMAIL --password $$ADMIN_PASSWORD || true &&
+      superset init"
+    restart: "no"
+
+  superset-redis:
+    image: redis:7-alpine
+    container_name: bi-superset-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - superset_redis_data:/data
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: bi-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  superset_home:
+  superset_redis_data:
+  grafana_data:

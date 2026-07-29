@@ -7,6 +7,7 @@ from aihr.config import get_settings
 
 API_URL = get_settings().api_url.rstrip("/")
 ALL_OPTION = "全部"
+REQUEST_TIMEOUT_SECONDS = 60
 
 
 class ApiError(RuntimeError):
@@ -15,7 +16,11 @@ class ApiError(RuntimeError):
 
 def _get(path: str, params: dict[str, Any] | None = None) -> Any:
     try:
-        response = requests.get(f"{API_URL}{path}", params=params, timeout=10)
+        response = requests.get(
+            f"{API_URL}{path}",
+            params=params,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
         response.raise_for_status()
     except requests.RequestException as exc:
         raise ApiError(f"无法连接分析 API：{exc}") from exc
