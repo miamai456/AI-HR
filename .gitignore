@@ -15,5 +15,6 @@ data/company/
 data/raw/
 exports/
 logs/
+.aihr_filter_state.json
 *.dump
 *.sql.gz
