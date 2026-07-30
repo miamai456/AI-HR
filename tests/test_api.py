@@ -109,6 +109,35 @@ def test_effectiveness_keeps_ai_and_human_comparison_when_source_filter_is_prese
     assert payload["human_sample_size"] > 0
 
 
+def test_prediction_insights_reports_ml_model_explanation_and_anomalies() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/prediction-insights")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["model_summary"]["model_name"] == "logistic_regression_conversion"
+    assert payload["model_summary"]["target"] == "interviewed"
+    assert payload["model_summary"]["sample_size"] > 0
+    assert 0 <= payload["model_summary"]["auc"] <= 1
+    assert 0 <= payload["model_summary"]["accuracy"] <= 1
+    assert payload["probability_bands"]
+    assert payload["top_features"]
+    assert payload["segment_performance"]
+    assert payload["anomaly_findings"]
+    assert payload["method_notes"]
+
+    for band in payload["probability_bands"]:
+        assert band["band"]
+        assert band["recommendations"] >= 0
+        assert 0 <= band["predicted_conversion_rate"] <= 1
+        assert 0 <= band["actual_conversion_rate"] <= 1
+
+    for feature in payload["top_features"]:
+        assert feature["feature"]
+        assert feature["direction"] in {"positive", "negative"}
+        assert feature["importance"] >= 0
+
+
 def test_funnel_is_monotonic() -> None:
     with TestClient(app) as client:
         rows = client.get("/api/v1/funnel").json()
@@ -199,6 +228,30 @@ def test_monitoring_reports_alert_and_anomaly_diagnostic_conclusions() -> None:
         )
         breakdown = conclusion["breakdown"]
         assert {"job_category", "region", "recruiter_team", "model_version"} <= set(breakdown)
+
+
+def test_monitoring_returns_empty_payload_for_empty_filter_combination() -> None:
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/monitoring",
+            params={
+                "start_date": "2026-01-01",
+                "end_date": "2026-06-29",
+                "source": "human",
+                "job_category": "技术",
+                "region": "华北",
+                "model_version": "ai_ranker_2026_q2",
+                "recruiter_team": "华东招聘组",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["current_end"] == "2026-06-29"
+    assert payload["rows"] == []
+    assert payload["model_version_trends"] == []
+    assert payload["drift_metrics"] == []
+    assert payload["diagnostic_conclusions"] == []
 
 
 def test_data_quality_reports_structured_layer_freshness_and_checks() -> None:

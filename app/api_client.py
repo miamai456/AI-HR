@@ -55,6 +55,10 @@ def get_data_quality(params: dict[str, Any] | None = None) -> dict:
     return _get("/data-quality", params=params)
 
 
+def get_prediction_insights(params: dict[str, Any] | None = None) -> dict:
+    return _get("/prediction-insights", params=params)
+
+
 def build_query(
     date_range: tuple[date, date] | list[date],
     source: str,

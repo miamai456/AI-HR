@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.api_client import ApiError, build_query, get_funnel
-from app.ui import SOURCE_COLORS, SOURCE_LABELS, configure_page, render_filters
+from app.ui import SOURCE_COLORS, SOURCE_LABELS, configure_page, render_filters, render_table
 
 configure_page("招聘漏斗")
 st.title("招聘漏斗")
@@ -54,4 +54,4 @@ table = pd.DataFrame(rows).rename(
     }
 )
 table["推荐来源"] = table["推荐来源"].map(SOURCE_LABELS)
-st.dataframe(table, width="stretch", hide_index=True)
+render_table(table, width="stretch", hide_index=True)

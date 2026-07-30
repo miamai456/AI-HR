@@ -3,7 +3,9 @@ from datetime import date, datetime, time, timedelta
 from math import sqrt
 
 import numpy as np
+from sklearn.ensemble import IsolationForest
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.preprocessing import OneHotEncoder
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -45,6 +47,7 @@ EVENT_STAGE_ORDER = {
 }
 VALID_SOURCES = {"ai", "human"}
 VALID_EVENT_STATUSES = {"completed", "skipped"}
+PREDICTION_MAX_RECORDS = 5000
 
 
 def _rate(numerator: int | None, denominator: int | None) -> float:
@@ -944,7 +947,21 @@ def get_monitoring(session: Session, **filters) -> dict:
     ).scalar()
     max_date = max_date_dt.date() if max_date_dt else None
     if max_date is None:
-        raise ValueError("No analytics data is available")
+        max_date = filters.get("end_date") or _quality_period(session)[1]
+        current_start = max_date - timedelta(days=29)
+        baseline_end = current_start - timedelta(days=1)
+        baseline_start = baseline_end - timedelta(days=29)
+        return {
+            "baseline_start": baseline_start,
+            "baseline_end": baseline_end,
+            "current_start": current_start,
+            "current_end": max_date,
+            "rows": [],
+            "thresholds": MONITORING_THRESHOLDS,
+            "model_version_trends": [],
+            "drift_metrics": [],
+            "diagnostic_conclusions": [],
+        }
 
     current_start = max_date - timedelta(days=29)
     baseline_end = current_start - timedelta(days=1)
@@ -1082,23 +1099,38 @@ def _duplicate_primary_key_count(session: Session, model) -> int:
     return session.scalar(select(func.count()).select_from(duplicate_groups)) or 0
 
 
-def _event_scope(statement, recommendation_ids: list[str]):
-    if recommendation_ids:
-        return statement.where(FunnelEvent.recommendation_id.in_(recommendation_ids))
-    return statement
+def _recommendation_id_scope(session: Session, **filters):
+    return (
+        _recommendation_query(session, **filters)
+        .with_entities(Recommendation.recommendation_id)
+        .subquery("filtered_recommendations")
+    )
 
 
-def _missing_critical_field_count(session: Session, recommendation_ids: list[str]) -> int:
+def _event_scope(statement, recommendation_scope):
+    return statement.join(
+        recommendation_scope,
+        FunnelEvent.recommendation_id == recommendation_scope.c.recommendation_id,
+    )
+
+
+def _recommendation_scope(statement, recommendation_scope):
+    return statement.where(
+        Recommendation.recommendation_id.in_(select(recommendation_scope.c.recommendation_id))
+    )
+
+
+def _missing_critical_field_count(session: Session, recommendation_scope) -> int:
     statement = _event_scope(
         select(func.count())
         .select_from(FunnelEvent)
         .where(FunnelEvent.status == "completed", FunnelEvent.event_at.is_(None)),
-        recommendation_ids,
+        recommendation_scope,
     )
     return session.scalar(statement) or 0
 
 
-def _orphan_event_count(session: Session, recommendation_ids: list[str]) -> int:
+def _orphan_event_count(session: Session, recommendation_scope) -> int:
     statement = (
         select(func.count())
         .select_from(FunnelEvent)
@@ -1108,14 +1140,14 @@ def _orphan_event_count(session: Session, recommendation_ids: list[str]) -> int:
         )
         .where(Recommendation.recommendation_id.is_(None))
     )
-    statement = _event_scope(statement, recommendation_ids)
+    statement = _event_scope(statement, recommendation_scope)
     return (
         session.scalar(statement)
         or 0
     )
 
 
-def _illegal_event_order_count(session: Session, recommendation_ids: list[str]) -> int:
+def _illegal_event_order_count(session: Session, recommendation_scope) -> int:
     statement = (
         select(FunnelEvent.recommendation_id, FunnelEvent.stage, FunnelEvent.event_at)
         .where(
@@ -1125,7 +1157,7 @@ def _illegal_event_order_count(session: Session, recommendation_ids: list[str]) 
         )
         .order_by(FunnelEvent.recommendation_id, FunnelEvent.event_at)
     )
-    rows = session.execute(_event_scope(statement, recommendation_ids)).all()
+    rows = session.execute(_event_scope(statement, recommendation_scope)).all()
     latest_stage_rank_by_recommendation: dict[str, int] = {}
     invalid_recommendations = set()
     for recommendation_id, stage, _event_at in rows:
@@ -1140,27 +1172,27 @@ def _illegal_event_order_count(session: Session, recommendation_ids: list[str]) 
 def _future_timestamp_count(
     session: Session,
     generated_at: datetime,
-    recommendation_ids: list[str],
+    recommendation_scope,
 ) -> int:
     recommendation_statement = (
         select(func.count())
         .select_from(Recommendation)
         .where(Recommendation.recommended_at > generated_at)
     )
-    if recommendation_ids:
-        recommendation_statement = recommendation_statement.where(
-            Recommendation.recommendation_id.in_(recommendation_ids)
-        )
+    recommendation_statement = _recommendation_scope(
+        recommendation_statement,
+        recommendation_scope,
+    )
     event_statement = _event_scope(
         select(func.count()).select_from(FunnelEvent).where(FunnelEvent.event_at > generated_at),
-        recommendation_ids,
+        recommendation_scope,
     )
     recommendation_count = session.scalar(recommendation_statement) or 0
     event_count = session.scalar(event_statement) or 0
     return recommendation_count + event_count
 
 
-def _negative_duration_count(session: Session, recommendation_ids: list[str]) -> int:
+def _negative_duration_count(session: Session, recommendation_scope) -> int:
     statement = (
         select(func.count())
         .select_from(FunnelEvent)
@@ -1173,31 +1205,28 @@ def _negative_duration_count(session: Session, recommendation_ids: list[str]) ->
             FunnelEvent.event_at < Recommendation.recommended_at,
         )
     )
-    statement = _event_scope(statement, recommendation_ids)
+    statement = _event_scope(statement, recommendation_scope)
     return session.scalar(statement) or 0
 
 
-def _invalid_enum_count(session: Session, recommendation_ids: list[str]) -> int:
+def _invalid_enum_count(session: Session, recommendation_scope) -> int:
     source_statement = (
         select(func.count())
         .select_from(Recommendation)
         .where(Recommendation.source.not_in(VALID_SOURCES))
     )
-    if recommendation_ids:
-        source_statement = source_statement.where(
-            Recommendation.recommendation_id.in_(recommendation_ids)
-        )
+    source_statement = _recommendation_scope(source_statement, recommendation_scope)
     invalid_event_stage_statement = _event_scope(
         select(func.count())
         .select_from(FunnelEvent)
         .where(FunnelEvent.stage.not_in(set(EVENT_STAGE_ORDER))),
-        recommendation_ids,
+        recommendation_scope,
     )
     invalid_event_status_statement = _event_scope(
         select(func.count())
         .select_from(FunnelEvent)
         .where(FunnelEvent.status.not_in(VALID_EVENT_STATUSES)),
-        recommendation_ids,
+        recommendation_scope,
     )
     invalid_sources = session.scalar(source_statement) or 0
     invalid_event_stages = session.scalar(invalid_event_stage_statement) or 0
@@ -1208,17 +1237,15 @@ def _invalid_enum_count(session: Session, recommendation_ids: list[str]) -> int:
 def _data_latency_days(
     session: Session,
     generated_at: datetime,
-    recommendation_ids: list[str],
+    recommendation_scope,
 ) -> int:
     event_statement = select(func.max(FunnelEvent.event_at))
     recommendation_statement = select(func.max(Recommendation.recommended_at))
-    if recommendation_ids:
-        event_statement = event_statement.where(
-            FunnelEvent.recommendation_id.in_(recommendation_ids)
-        )
-        recommendation_statement = recommendation_statement.where(
-            Recommendation.recommendation_id.in_(recommendation_ids)
-        )
+    event_statement = _event_scope(event_statement.select_from(FunnelEvent), recommendation_scope)
+    recommendation_statement = _recommendation_scope(
+        recommendation_statement.select_from(Recommendation),
+        recommendation_scope,
+    )
     latest_event = session.scalar(event_statement)
     latest_recommendation = session.scalar(recommendation_statement)
     latest_observed = max(
@@ -1230,14 +1257,17 @@ def _data_latency_days(
     return max((generated_at.date() - latest_observed.date()).days, 0)
 
 
-def _queue_maturity(session: Session, recommendation_ids: list[str]) -> tuple[int, int, float]:
+def _queue_maturity(
+    session: Session,
+    recommendation_scope,
+    total_recommendations: int,
+) -> tuple[int, int, float]:
     max_statement = select(func.max(Recommendation.recommended_at))
-    if recommendation_ids:
-        max_statement = max_statement.where(
-            Recommendation.recommendation_id.in_(recommendation_ids)
-        )
+    max_statement = _recommendation_scope(
+        max_statement.select_from(Recommendation),
+        recommendation_scope,
+    )
     max_recommended_at = session.scalar(max_statement)
-    total_recommendations = len(recommendation_ids)
     if not max_recommended_at or not total_recommendations:
         return 0, total_recommendations, 0.0
     mature_cutoff = max_recommended_at - timedelta(days=30)
@@ -1246,10 +1276,7 @@ def _queue_maturity(session: Session, recommendation_ids: list[str]) -> tuple[in
         .select_from(Recommendation)
         .where(Recommendation.recommended_at <= mature_cutoff)
     )
-    if recommendation_ids:
-        mature_statement = mature_statement.where(
-            Recommendation.recommendation_id.in_(recommendation_ids)
-        )
+    mature_statement = _recommendation_scope(mature_statement, recommendation_scope)
     mature_count = session.scalar(mature_statement) or 0
     return mature_count, total_recommendations, round(mature_count / total_recommendations, 4)
 
@@ -1282,30 +1309,35 @@ def get_data_quality(session: Session, **filters) -> dict:
         for layer_name, layer_type, model in layer_models
     ]
 
-    filtered_recommendations = _recommendation_query(session, **filters).all()
-    recommendation_ids = [row.recommendation_id for row in filtered_recommendations]
-    recommendation_count = len(recommendation_ids)
-    if recommendation_ids:
-        event_count_statement = (
-            select(func.count())
-            .select_from(FunnelEvent)
-            .where(FunnelEvent.recommendation_id.in_(recommendation_ids))
-        )
-        event_count = session.scalar(event_count_statement) or 0
-    else:
-        event_count = 0
+    recommendation_scope = _recommendation_id_scope(session, **filters)
+    recommendation_count = (
+        session.scalar(select(func.count()).select_from(recommendation_scope)) or 0
+    )
+    event_count_statement = _event_scope(
+        select(func.count()).select_from(FunnelEvent),
+        recommendation_scope,
+    )
+    event_count = session.scalar(event_count_statement) or 0
     duplicate_pk_count = sum(
         _duplicate_primary_key_count(session, model) for _, _, model in layer_models
     )
-    if recommendation_ids:
-        missing_critical_count = _missing_critical_field_count(session, recommendation_ids)
-        orphan_event_count = _orphan_event_count(session, recommendation_ids)
-        illegal_order_count = _illegal_event_order_count(session, recommendation_ids)
-        future_timestamp_count = _future_timestamp_count(session, generated_at, recommendation_ids)
-        negative_duration_count = _negative_duration_count(session, recommendation_ids)
-        invalid_enum_count = _invalid_enum_count(session, recommendation_ids)
-        latency_days = _data_latency_days(session, generated_at, recommendation_ids)
-        mature_count, total_queue_count, mature_share = _queue_maturity(session, recommendation_ids)
+    if recommendation_count:
+        missing_critical_count = _missing_critical_field_count(session, recommendation_scope)
+        orphan_event_count = _orphan_event_count(session, recommendation_scope)
+        illegal_order_count = _illegal_event_order_count(session, recommendation_scope)
+        future_timestamp_count = _future_timestamp_count(
+            session,
+            generated_at,
+            recommendation_scope,
+        )
+        negative_duration_count = _negative_duration_count(session, recommendation_scope)
+        invalid_enum_count = _invalid_enum_count(session, recommendation_scope)
+        latency_days = _data_latency_days(session, generated_at, recommendation_scope)
+        mature_count, total_queue_count, mature_share = _queue_maturity(
+            session,
+            recommendation_scope,
+            recommendation_count,
+        )
     else:
         missing_critical_count = 0
         orphan_event_count = 0
@@ -1519,6 +1551,316 @@ def _effectiveness_records(session: Session, **filters) -> list[dict]:
         for row in query.all()
         if row.source in {"ai", "human"}
     ]
+
+
+def _prediction_records(session: Session, **filters) -> list[dict]:
+    query = (
+        session.query(
+            Recommendation.recommendation_id,
+            Recommendation.source,
+            Recommendation.recommendation_score,
+            Recommendation.recommended_at,
+            Candidate.experience_years,
+            Candidate.education_level,
+            Job.job_category,
+            Job.region,
+            Job.seniority_level,
+            ModelVersion.model_version,
+            Recruiter.team,
+        )
+        .join(Candidate, Recommendation.candidate_id == Candidate.candidate_id)
+        .join(Job, Recommendation.job_id == Job.job_id)
+        .join(ModelVersion, Recommendation.model_version_id == ModelVersion.model_version_id)
+        .join(Recruiter, Recommendation.recruiter_id == Recruiter.recruiter_id)
+    )
+    start_date = filters.get("start_date")
+    end_date = filters.get("end_date")
+    if start_date:
+        query = query.filter(
+            Recommendation.recommended_at >= datetime.combine(start_date, time.min)
+        )
+    if end_date:
+        query = query.filter(Recommendation.recommended_at <= datetime.combine(end_date, time.max))
+    if source := filters.get("source"):
+        query = query.filter(Recommendation.source == source)
+    if job_category := filters.get("job_category"):
+        query = query.filter(Job.job_category == job_category)
+    if region := filters.get("region"):
+        query = query.filter(Job.region == region)
+    if model_version := filters.get("model_version"):
+        query = query.filter(ModelVersion.model_version == model_version)
+    if recruiter_team := filters.get("recruiter_team"):
+        query = query.filter(Recruiter.team == recruiter_team)
+
+    rows = query.order_by(Recommendation.recommended_at.desc()).limit(PREDICTION_MAX_RECORDS).all()
+    recommendation_ids = [row.recommendation_id for row in rows]
+    outcomes = set()
+    if recommendation_ids:
+        outcomes = {
+            recommendation_id
+            for recommendation_id, in session.query(FunnelEvent.recommendation_id)
+            .filter(
+                FunnelEvent.recommendation_id.in_(recommendation_ids),
+                FunnelEvent.stage == "interviewed",
+                FunnelEvent.status == "completed",
+            )
+            .distinct()
+            .all()
+        }
+
+    return [
+        {
+            "recommendation_id": row.recommendation_id,
+            "source": row.source,
+            "recommendation_score": row.recommendation_score,
+            "experience_years": row.experience_years,
+            "education_level": row.education_level,
+            "job_category": row.job_category,
+            "region": row.region,
+            "seniority_level": row.seniority_level,
+            "model_version": row.model_version,
+            "recruiter_team": row.team,
+            "outcome": 1 if row.recommendation_id in outcomes else 0,
+        }
+        for row in rows
+        if row.source in VALID_SOURCES
+    ]
+
+
+def _prediction_feature_matrix(records: list[dict]):
+    numeric = np.array(
+        [
+            [record["recommendation_score"], record["experience_years"]]
+            for record in records
+        ],
+        dtype=float,
+    )
+    categorical_names = [
+        "source",
+        "education_level",
+        "job_category",
+        "region",
+        "seniority_level",
+        "model_version",
+        "recruiter_team",
+    ]
+    categorical = np.array(
+        [[record[name] for name in categorical_names] for record in records],
+        dtype=object,
+    )
+    encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    encoded = encoder.fit_transform(categorical)
+    feature_names = [
+        "recommendation_score",
+        "experience_years",
+        *encoder.get_feature_names_out(categorical_names).tolist(),
+    ]
+    return np.hstack([numeric, encoded]), feature_names
+
+
+def _empty_prediction_insights() -> dict:
+    return {
+        "model_summary": {
+            "model_name": "logistic_regression_conversion",
+            "target": "interviewed",
+            "sample_size": 0,
+            "positive_rate": 0.0,
+            "auc": 0.5,
+            "accuracy": 0.0,
+            "anomaly_model": "isolation_forest",
+        },
+        "probability_bands": [],
+        "top_features": [],
+        "segment_performance": [],
+        "anomaly_findings": [],
+        "method_notes": [
+            "No eligible recommendation records were available for the selected filters."
+        ],
+        "data_origin": "synthetic",
+    }
+
+
+def _probability_bands(probabilities: np.ndarray, outcomes: np.ndarray) -> list[dict]:
+    average_rate = float(outcomes.mean()) if len(outcomes) else 0.0
+    bands = [
+        ("0-20%", 0.0, 0.2),
+        ("20-40%", 0.2, 0.4),
+        ("40-60%", 0.4, 0.6),
+        ("60-80%", 0.6, 0.8),
+        ("80-100%", 0.8, 1.01),
+    ]
+    rows = []
+    for label, lower, upper in bands:
+        mask = (probabilities >= lower) & (probabilities < upper)
+        if not mask.any():
+            continue
+        predicted_rate = float(probabilities[mask].mean())
+        actual_rate = float(outcomes[mask].mean())
+        rows.append(
+            {
+                "band": label,
+                "recommendations": int(mask.sum()),
+                "predicted_conversion_rate": round(predicted_rate, 4),
+                "actual_conversion_rate": round(actual_rate, 4),
+                "lift_vs_average": round(actual_rate - average_rate, 4),
+            }
+        )
+    return rows
+
+
+def _top_feature_contributions(
+    features: np.ndarray,
+    feature_names: list[str],
+    coefficients: np.ndarray,
+    limit: int = 12,
+) -> list[dict]:
+    contributions = features * coefficients
+    rows = []
+    for index, feature_name in enumerate(feature_names):
+        average_contribution = float(contributions[:, index].mean())
+        importance = float(np.abs(contributions[:, index]).mean())
+        rows.append(
+            {
+                "feature": feature_name,
+                "direction": "positive" if average_contribution >= 0 else "negative",
+                "importance": round(importance, 6),
+                "average_contribution": round(average_contribution, 6),
+            }
+        )
+    rows.sort(key=lambda row: row["importance"], reverse=True)
+    return rows[:limit]
+
+
+def _segment_performance(
+    records: list[dict],
+    probabilities: np.ndarray,
+    outcomes: np.ndarray,
+    min_sample_size: int = 30,
+) -> list[dict]:
+    grouped = defaultdict(lambda: {"n": 0, "predicted": 0.0, "actual": 0})
+    segment_fields = ["source", "job_category", "region", "model_version", "recruiter_team"]
+    for record, probability, outcome in zip(records, probabilities, outcomes, strict=True):
+        for field in segment_fields:
+            key = (field, record[field])
+            grouped[key]["n"] += 1
+            grouped[key]["predicted"] += float(probability)
+            grouped[key]["actual"] += int(outcome)
+
+    average_rate = float(outcomes.mean()) if len(outcomes) else 0.0
+    rows = []
+    for (field, value), values in grouped.items():
+        if values["n"] < min_sample_size:
+            continue
+        actual_rate = values["actual"] / values["n"]
+        rows.append(
+            {
+                "segment_type": field,
+                "segment_value": value,
+                "recommendations": values["n"],
+                "predicted_conversion_rate": round(values["predicted"] / values["n"], 4),
+                "actual_conversion_rate": round(actual_rate, 4),
+                "lift_vs_average": round(actual_rate - average_rate, 4),
+            }
+        )
+    rows.sort(key=lambda row: abs(row["lift_vs_average"]), reverse=True)
+    return rows[:12]
+
+
+def _anomaly_findings(
+    records: list[dict],
+    features: np.ndarray,
+    probabilities: np.ndarray,
+    outcomes: np.ndarray,
+    limit: int = 12,
+) -> list[dict]:
+    if len(records) < 20:
+        return []
+    model = IsolationForest(contamination=0.03, random_state=42)
+    model.fit(features)
+    anomaly_scores = -model.score_samples(features)
+    residuals = np.abs(outcomes - probabilities)
+    ranking = np.argsort(-(anomaly_scores + residuals))[:limit]
+    rows = []
+    for index in ranking:
+        record = records[int(index)]
+        rows.append(
+            {
+                "recommendation_id": record["recommendation_id"],
+                "anomaly_score": round(float(anomaly_scores[index]), 4),
+                "predicted_conversion_probability": round(float(probabilities[index]), 4),
+                "actual_outcome": int(outcomes[index]),
+                "source": record["source"],
+                "job_category": record["job_category"],
+                "region": record["region"],
+                "model_version": record["model_version"],
+                "recruiter_team": record["recruiter_team"],
+                "evidence": (
+                    "High isolation score combined with prediction/outcome mismatch."
+                ),
+            }
+        )
+    return rows
+
+
+def get_prediction_insights(session: Session, **filters) -> dict:
+    records = _prediction_records(session, **filters)
+    if not records:
+        return _empty_prediction_insights()
+
+    outcomes = np.array([record["outcome"] for record in records], dtype=int)
+    if len(set(outcomes.tolist())) < 2:
+        return _empty_prediction_insights() | {
+            "model_summary": {
+                **_empty_prediction_insights()["model_summary"],
+                "sample_size": len(records),
+                "positive_rate": round(float(outcomes.mean()), 4),
+            }
+        }
+
+    features, feature_names = _prediction_feature_matrix(records)
+    model = LogisticRegression(max_iter=1000, solver="lbfgs")
+    model.fit(features, outcomes)
+    probabilities = np.clip(model.predict_proba(features)[:, 1], 0.001, 0.999)
+    predictions = (probabilities >= 0.5).astype(int)
+
+    return {
+        "model_summary": {
+            "model_name": "logistic_regression_conversion",
+            "target": "interviewed",
+            "sample_size": len(records),
+            "positive_rate": round(float(outcomes.mean()), 4),
+            "auc": round(float(roc_auc_score(outcomes, probabilities)), 4),
+            "accuracy": round(float(accuracy_score(outcomes, predictions)), 4),
+            "anomaly_model": "isolation_forest",
+        },
+        "probability_bands": _probability_bands(probabilities, outcomes),
+        "top_features": _top_feature_contributions(
+            features,
+            feature_names,
+            model.coef_[0],
+        ),
+        "segment_performance": _segment_performance(records, probabilities, outcomes),
+        "anomaly_findings": _anomaly_findings(records, features, probabilities, outcomes),
+        "method_notes": [
+            (
+                "Logistic regression estimates the probability that a recommendation "
+                "reaches interview."
+            ),
+            (
+                "Feature contributions use model coefficients multiplied by observed "
+                "feature values; they are directional signals, not causal effects."
+            ),
+            (
+                "Isolation Forest flags unusual recommendations by feature profile "
+                "and prediction/outcome mismatch."
+            ),
+            (
+                "This MVP avoids extra heavy dependencies; XGBoost/LightGBM and SHAP "
+                "can replace the prediction and explanation layers later."
+            ),
+        ],
+        "data_origin": "synthetic",
+    }
 
 
 def _propensity_adjustment(records: list[dict]) -> dict:

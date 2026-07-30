@@ -3,7 +3,14 @@ import plotly.express as px
 import streamlit as st
 
 from app.api_client import ApiError, build_query, get_overview
-from app.ui import SOURCE_COLORS, SOURCE_LABELS, configure_page, format_percent, render_filters
+from app.ui import (
+    SOURCE_COLORS,
+    SOURCE_LABELS,
+    configure_page,
+    format_percent,
+    render_filters,
+    render_table,
+)
 
 configure_page("AIHR 总览")
 st.title("AIHR 推荐效果总览")
@@ -60,7 +67,7 @@ alerts = pd.DataFrame(result["open_alerts"])
 if alerts.empty:
     st.success("当前筛选范围没有未解决告警。")
 else:
-    st.dataframe(
+    render_table(
         alerts.rename(
             columns={
                 "alert_key": "告警键",

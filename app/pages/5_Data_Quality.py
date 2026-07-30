@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from app.api_client import ApiError, build_query, get_data_quality
-from app.ui import configure_page, render_filters
+from app.ui import configure_page, render_filters, render_table
 
 configure_page("AIHR 数据质量")
 st.title("AIHR 数据质量")
@@ -38,7 +38,7 @@ if not layers.empty:
             "last_updated_at": "最后更新时间",
         }
     )
-    st.dataframe(layer_display, hide_index=True, width="stretch")
+    render_table(layer_display, hide_index=True, width="stretch")
 
 st.subheader("质量检查结果")
 checks = pd.DataFrame(result["checks"])
@@ -60,4 +60,4 @@ else:
             "details": "结构化详情",
         }
     )
-    st.dataframe(check_display, hide_index=True, width="stretch")
+    render_table(check_display, hide_index=True, width="stretch")

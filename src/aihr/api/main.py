@@ -19,6 +19,7 @@ from aihr.schemas import (
     HealthResponse,
     MonitoringResponse,
     OverviewResponse,
+    PredictionInsightsResponse,
 )
 from aihr.seed import SyntheticHiringConfig, seed_demo_metrics
 from aihr.services.analytics import (
@@ -28,6 +29,7 @@ from aihr.services.analytics import (
     get_funnel,
     get_monitoring,
     get_overview,
+    get_prediction_insights,
 )
 
 DbSession = Annotated[Session, Depends(get_db)]
@@ -179,6 +181,32 @@ def create_app(database_url: str | None = None) -> FastAPI:
         recruiter_team: str | None = None,
     ) -> dict:
         return get_data_quality(
+            session,
+            start_date=start_date,
+            end_date=end_date,
+            source=source,
+            job_category=job_category,
+            region=region,
+            model_version=model_version,
+            recruiter_team=recruiter_team,
+        )
+
+    @application.get(
+        "/api/v1/prediction-insights",
+        response_model=PredictionInsightsResponse,
+        tags=["analytics"],
+    )
+    def prediction_insights(
+        session: DbSession,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        source: str | None = Query(default=None, pattern="^(ai|human)$"),
+        job_category: str | None = None,
+        region: str | None = None,
+        model_version: str | None = None,
+        recruiter_team: str | None = None,
+    ) -> dict:
+        return get_prediction_insights(
             session,
             start_date=start_date,
             end_date=end_date,

@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.api_client import ApiError, build_query, get_effectiveness
-from app.ui import SOURCE_COLORS, configure_page, render_filters
+from app.ui import SOURCE_COLORS, configure_page, render_filters, render_table
 
 configure_page("AI 推荐效果评估")
 st.title("AI 推荐效果评估")
@@ -95,7 +95,7 @@ diagnostic_df = pd.DataFrame(
         {"诊断项": "截尾后最大权重", "结果": f"{weights['max_weight_after']:.2f}"},
     ]
 )
-st.dataframe(diagnostic_df, hide_index=True, width="stretch")
+render_table(diagnostic_df, hide_index=True, width="stretch")
 
 st.subheader("调整前后 SMD")
 balance_df = pd.DataFrame(result["balance_diagnostics"]).rename(
@@ -105,4 +105,4 @@ balance_df = pd.DataFrame(result["balance_diagnostics"]).rename(
         "smd_after": "调整后 SMD",
     }
 )
-st.dataframe(balance_df, hide_index=True, width="stretch")
+render_table(balance_df, hide_index=True, width="stretch")

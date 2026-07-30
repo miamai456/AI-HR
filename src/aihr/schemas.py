@@ -227,3 +227,60 @@ class DataQualityResponse(BaseModel):
     layers: list[DataQualityLayer]
     checks: list[DataQualityCheck]
     data_origin: str
+
+
+class PredictionModelSummary(BaseModel):
+    model_name: str
+    target: str
+    sample_size: int
+    positive_rate: float = Field(ge=0, le=1)
+    auc: float = Field(ge=0, le=1)
+    accuracy: float = Field(ge=0, le=1)
+    anomaly_model: str
+
+
+class ProbabilityBand(BaseModel):
+    band: str
+    recommendations: int
+    predicted_conversion_rate: float = Field(ge=0, le=1)
+    actual_conversion_rate: float = Field(ge=0, le=1)
+    lift_vs_average: float
+
+
+class FeatureContribution(BaseModel):
+    feature: str
+    direction: str
+    importance: float
+    average_contribution: float
+
+
+class SegmentPerformance(BaseModel):
+    segment_type: str
+    segment_value: str
+    recommendations: int
+    predicted_conversion_rate: float = Field(ge=0, le=1)
+    actual_conversion_rate: float = Field(ge=0, le=1)
+    lift_vs_average: float
+
+
+class AnomalyFinding(BaseModel):
+    recommendation_id: str
+    anomaly_score: float
+    predicted_conversion_probability: float = Field(ge=0, le=1)
+    actual_outcome: int
+    source: str
+    job_category: str
+    region: str
+    model_version: str
+    recruiter_team: str
+    evidence: str
+
+
+class PredictionInsightsResponse(BaseModel):
+    model_summary: PredictionModelSummary
+    probability_bands: list[ProbabilityBand]
+    top_features: list[FeatureContribution]
+    segment_performance: list[SegmentPerformance]
+    anomaly_findings: list[AnomalyFinding]
+    method_notes: list[str]
+    data_origin: str

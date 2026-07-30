@@ -2,6 +2,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from app.api_client import ALL_OPTION, ApiError, get_filters
@@ -37,6 +38,16 @@ def configure_page(title: str) -> None:
         .block-container {padding-top: 1.5rem; padding-bottom: 2rem; max-width: 1440px;}
         [data-testid="stMetric"] {border-top: 2px solid #D1D5DB; padding-top: 0.75rem;}
         [data-testid="stSidebar"] {border-right: 1px solid #E5E7EB;}
+        .aihr-table {overflow-x: auto; border: 1px solid #E5E7EB; border-radius: 6px;}
+        .aihr-table table {border-collapse: collapse; width: 100%; font-size: 0.92rem;}
+        .aihr-table th {background: #F8FAFC; color: #0F172A; font-weight: 700;}
+        .aihr-table th, .aihr-table td {
+            border-bottom: 1px solid #E5E7EB;
+            padding: 0.55rem 0.7rem;
+            text-align: left;
+            white-space: nowrap;
+        }
+        .aihr-table tr:last-child td {border-bottom: 0;}
         </style>
         """,
         unsafe_allow_html=True,
@@ -225,3 +236,13 @@ def render_filters() -> tuple[list[date], str, str, str, str, str]:
 
 def format_percent(value: float) -> str:
     return f"{value:.1%}"
+
+
+def render_table(dataframe: pd.DataFrame, **_ignored) -> None:
+    if dataframe.empty:
+        st.info("当前筛选范围没有可展示的表格数据。")
+        return
+    st.markdown(
+        f'<div class="aihr-table">{dataframe.to_html(index=False, escape=True)}</div>',
+        unsafe_allow_html=True,
+    )

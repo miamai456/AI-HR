@@ -4,7 +4,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.api_client import ApiError, build_query, get_monitoring_with_filters
-from app.ui import SOURCE_COLORS, SOURCE_LABELS, configure_page, format_percent, render_filters
+from app.ui import (
+    SOURCE_COLORS,
+    SOURCE_LABELS,
+    configure_page,
+    format_percent,
+    render_filters,
+    render_table,
+)
 
 configure_page("模型监控")
 st.title("模型监控")
@@ -106,7 +113,7 @@ else:
             "current_sample_size": "当前样本量",
         }
     )
-    st.dataframe(display_drift, hide_index=True, width="stretch")
+    render_table(display_drift, hide_index=True, width="stretch")
 
 st.subheader("告警与异常诊断")
 conclusions = pd.DataFrame(result["diagnostic_conclusions"])
@@ -136,7 +143,7 @@ else:
             "model_version": "模型版本",
         }
     )
-    st.dataframe(display_conclusions, hide_index=True, width="stretch")
+    render_table(display_conclusions, hide_index=True, width="stretch")
 
 st.subheader("监控状态")
 for row in result["rows"]:
