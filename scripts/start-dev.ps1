@@ -19,7 +19,7 @@ $api = Start-Process $python `
     -PassThru
 
 $dashboard = Start-Process $python `
-    -ArgumentList "-m", "streamlit", "run", "app/Home.py", "--server.port", "8501" `
+    -ArgumentList "-m", "streamlit", "run", "app/首页.py", "--server.port", "8501" `
     -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $logs "dashboard.out.log") `
     -RedirectStandardError (Join-Path $logs "dashboard.err.log") `

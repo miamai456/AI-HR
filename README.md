@@ -74,8 +74,21 @@ uvicorn aihr.api.main:app --reload
 
 ```powershell
 $env:AIHR_API_URL="http://localhost:8000/api/v1"
-streamlit run app/Home.py
+streamlit run app/首页.py
 ```
+
+如需启用 AI 分析助手的大模型问答能力，可配置兼容 OpenAI Chat Completions
+格式的服务，例如 DeepSeek 或 Kimi：
+
+```powershell
+$env:AIHR_ASSISTANT_PROVIDER="deepseek"
+$env:AIHR_ASSISTANT_BASE_URL="https://api.deepseek.com"
+$env:AIHR_ASSISTANT_MODEL="deepseek-chat"
+$env:AIHR_ASSISTANT_API_KEY="你的 API Key"
+```
+
+未配置以上变量时，AI 分析助手会自动使用本地规则分析，仍可完成页面结论总结、
+异常风险提示和初次看板答疑。
 
 默认本地模式使用项目目录下的 SQLite；Docker 模式使用 MySQL。
 

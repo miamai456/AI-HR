@@ -44,7 +44,7 @@ Run the application locally with:
 ```powershell
 uvicorn aihr.api.main:app --reload
 $env:AIHR_API_URL="http://localhost:8000/api/v1"
-streamlit run app/Home.py
+streamlit run app/首页.py
 ```
 
 Docker flow:
