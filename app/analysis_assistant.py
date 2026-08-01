@@ -2,10 +2,11 @@ import os
 from typing import Any
 
 import requests
+import streamlit as st
 
 SYSTEM_PROMPT = """
 你是 AIHR 项目的数据分析助手。你只能基于用户提供的 JSON 分析上下文回答。
-回答必须面向招聘业务、数据分析师面试场景和初次接触看板的用户。
+回答必须面向招聘业务、客户决策场景和初次接触看板的用户。
 
 规则：
 1. 区分事实、推断和建议。
@@ -16,19 +17,30 @@ SYSTEM_PROMPT = """
 """.strip()
 
 
+def assistant_setting(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value:
+        return value
+    try:
+        secret_value = st.secrets.get(name, default)
+    except Exception:
+        return default
+    return str(secret_value) if secret_value else default
+
+
 def assistant_configured() -> bool:
     return bool(
-        os.getenv("AIHR_ASSISTANT_API_KEY")
-        and os.getenv("AIHR_ASSISTANT_BASE_URL")
-        and os.getenv("AIHR_ASSISTANT_MODEL")
+        assistant_setting("AIHR_ASSISTANT_API_KEY")
+        and assistant_setting("AIHR_ASSISTANT_BASE_URL")
+        and assistant_setting("AIHR_ASSISTANT_MODEL")
     )
 
 
 def assistant_config_summary() -> dict[str, str]:
     return {
-        "provider": os.getenv("AIHR_ASSISTANT_PROVIDER", "openai-compatible"),
-        "base_url": os.getenv("AIHR_ASSISTANT_BASE_URL", ""),
-        "model": os.getenv("AIHR_ASSISTANT_MODEL", ""),
+        "provider": assistant_setting("AIHR_ASSISTANT_PROVIDER", "openai-compatible"),
+        "base_url": assistant_setting("AIHR_ASSISTANT_BASE_URL"),
+        "model": assistant_setting("AIHR_ASSISTANT_MODEL"),
     }
 
 
@@ -163,7 +175,7 @@ def local_analysis(context: dict[str, Any], question: str) -> str:
 
     recommendations = [
         "先判断数据是否可信，再解释效果差异。",
-        "对面试官讲解时，先讲业务结论，再讲证据图表，最后讲限制和下一步动作。",
+        "面向业务使用者解释时，先讲业务结论，再讲证据图表，最后讲限制和下一步动作。",
     ]
     if "异常" in question or "风险" in question:
         recommendations.append("优先排查数据质量失败项、高风险漂移和异常推荐样本。")
@@ -188,12 +200,11 @@ def local_analysis(context: dict[str, Any], question: str) -> str:
 
 
 def call_llm(context: dict[str, Any], messages: list[dict[str, str]]) -> str:
-    base_url = os.environ["AIHR_ASSISTANT_BASE_URL"].rstrip("/")
-    api_key = os.environ["AIHR_ASSISTANT_API_KEY"]
-    model = os.environ["AIHR_ASSISTANT_MODEL"]
+    base_url = assistant_setting("AIHR_ASSISTANT_BASE_URL").rstrip("/")
+    api_key = assistant_setting("AIHR_ASSISTANT_API_KEY")
+    model = assistant_setting("AIHR_ASSISTANT_MODEL")
     payload = {
         "model": model,
-        "temperature": 0.2,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {

@@ -57,9 +57,7 @@ def data_trust_label(failed_checks: int, warning_checks: int, high_drift_count: 
 
 configure_page("Executive Dashboard")
 st.title("AIHR 招聘推荐分析驾驶舱")
-st.caption(
-    "面向面试官的 30 秒总览：先给结论，再展示证据，最后指出下一步业务动作。"
-)
+st.caption("面向业务使用者的 30 秒总览：先给结论，再展示证据，最后指出下一步动作。")
 
 date_range, source, job_category, region, model_version, recruiter_team = render_filters()
 if len(date_range) != 2:
@@ -263,6 +261,6 @@ render_ai_assistant(
     [
         "请总结首页最重要的业务结论。",
         "哪些风险会影响当前结论可信度？",
-        "面试官第一次看这个项目时我该怎么讲？",
+        "第一次看这个系统时应该先关注什么？",
     ],
 )

@@ -423,13 +423,13 @@ def render_ai_assistant(
     questions = starter_questions or [
         "请解释这页最重要的结论。",
         "有哪些异常或风险需要注意？",
-        "如果我是面试官，应该怎么理解这页？",
+        "业务使用者应该如何理解这页？",
     ]
     config = assistant_config_summary()
     st.markdown(
         f"""
         <div class="aihr-assistant-title">
-            <span class="aihr-assistant-avatar">🤖</span>
+            <span class="aihr-assistant-avatar">AI</span>
             <span>AI 分析助手 · {page_title}</span>
         </div>
         <div class="aihr-assistant-subtitle">
@@ -455,7 +455,7 @@ def render_ai_assistant(
             with st.chat_message("assistant", avatar="🤖"):
                 st.markdown(
                     f"你好，我是本页的 AI 分析助手。可以帮你解释“{page_title}”的图表结论、"
-                    "异常风险和面试讲解思路。你可以先点下面的快捷问题。"
+                    "异常风险、业务含义和下一步建议。你可以先点下面的快捷问题。"
                 )
 
         columns = st.columns(len(questions))
@@ -470,7 +470,7 @@ def render_ai_assistant(
             avatar = (
                 "🤖"
                 if message["role"] == "assistant"
-                else "👤"
+                else "🧑"
             )
             with st.chat_message(message["role"], avatar=avatar):
                 st.markdown(message["content"])
@@ -481,7 +481,7 @@ def render_ai_assistant(
         )
         if prompt:
             st.session_state[message_key].append({"role": "user", "content": prompt})
-            with st.chat_message("user", avatar="👤"):
+            with st.chat_message("user", avatar="🧑"):
                 st.markdown(prompt)
             with st.chat_message("assistant", avatar="🤖"):
                 with st.spinner("正在基于本页数据分析..."):
