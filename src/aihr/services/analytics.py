@@ -1099,6 +1099,30 @@ def _duplicate_primary_key_count(session: Session, model) -> int:
     return session.scalar(select(func.count()).select_from(duplicate_groups)) or 0
 
 
+def _duplicate_recommendation_count(session: Session, recommendation_scope) -> int:
+    duplicate_groups = (
+        select(func.count().label("row_count"))
+        .select_from(Recommendation)
+        .where(
+            Recommendation.recommendation_id.in_(
+                select(recommendation_scope.c.recommendation_id)
+            )
+        )
+        .group_by(
+            Recommendation.candidate_id,
+            Recommendation.job_id,
+            Recommendation.recommended_at,
+            Recommendation.source,
+        )
+        .having(func.count() > 1)
+        .subquery()
+    )
+    return (
+        session.scalar(select(func.sum(duplicate_groups.c.row_count - 1)))
+        or 0
+    )
+
+
 def _recommendation_id_scope(session: Session, **filters):
     return (
         _recommendation_query(session, **filters)
@@ -1321,6 +1345,9 @@ def get_data_quality(session: Session, **filters) -> dict:
     duplicate_pk_count = sum(
         _duplicate_primary_key_count(session, model) for _, _, model in layer_models
     )
+    duplicate_recommendation_count = _duplicate_recommendation_count(
+        session, recommendation_scope
+    )
     if recommendation_count:
         missing_critical_count = _missing_critical_field_count(session, recommendation_scope)
         orphan_event_count = _orphan_event_count(session, recommendation_scope)
@@ -1348,7 +1375,72 @@ def get_data_quality(session: Session, **filters) -> dict:
         latency_days = 0
         mature_count, total_queue_count, mature_share = 0, 0, 0.0
 
+    latest_data_at = max(
+        (layer["last_updated_at"] for layer in layers if layer["last_updated_at"]),
+        default=generated_at,
+    )
+    anomaly_count = (
+        missing_critical_count
+        + orphan_event_count
+        + illegal_order_count
+        + future_timestamp_count
+        + negative_duration_count
+        + invalid_enum_count
+    )
+    anomaly_sample_size = recommendation_count + event_count
+    anomaly_affected_count = min(anomaly_count, anomaly_sample_size)
+    anomaly_ratio = (
+        anomaly_affected_count / anomaly_sample_size if anomaly_sample_size else 0.0
+    )
+
     checks = [
+        _quality_check(
+            check_type="data_freshness",
+            check_name="Data freshness",
+            evidence_metric="days_since_latest_data",
+            affected_count=latency_days,
+            sample_size=max(latency_days, 1),
+            period_start=period_start,
+            period_end=period_end,
+            details={
+                "latest_data_at": latest_data_at.isoformat(),
+                "warning_threshold_days": 7,
+                "failure_threshold_days": 30,
+            },
+            status="fail" if latency_days > 30 else "warn" if latency_days > 7 else "pass",
+        ),
+        _quality_check(
+            check_type="duplicate_data",
+            check_name="Duplicate data",
+            evidence_metric="duplicate_record_groups",
+            affected_count=duplicate_recommendation_count,
+            sample_size=recommendation_count,
+            period_start=period_start,
+            period_end=period_end,
+            details={
+                "business_key": [
+                    "candidate_id",
+                    "job_id",
+                    "recommended_at",
+                    "source",
+                ]
+            },
+        ),
+        _quality_check(
+            check_type="anomaly_ratio",
+            check_name="Anomalous record ratio",
+            evidence_metric="anomalous_record_ratio",
+            affected_count=anomaly_affected_count,
+            sample_size=anomaly_sample_size,
+            period_start=period_start,
+            period_end=period_end,
+            details={
+                "anomaly_ratio": round(anomaly_ratio, 6),
+                "warning_threshold": 0.01,
+                "failure_threshold": 0.05,
+            },
+            status="fail" if anomaly_ratio > 0.05 else "warn" if anomaly_ratio > 0.01 else "pass",
+        ),
         _quality_check(
             check_type="duplicate_primary_key",
             check_name="Duplicate primary keys across modeled tables",
@@ -1673,6 +1765,7 @@ def _empty_prediction_insights() -> dict:
         "top_features": [],
         "segment_performance": [],
         "anomaly_findings": [],
+        "anomaly_total": 0,
         "method_notes": [
             "No eligible recommendation records were available for the selected filters."
         ],
@@ -1772,6 +1865,7 @@ def _anomaly_findings(
     probabilities: np.ndarray,
     outcomes: np.ndarray,
     limit: int = 12,
+    offset: int = 0,
 ) -> list[dict]:
     if len(records) < 20:
         return []
@@ -1779,7 +1873,7 @@ def _anomaly_findings(
     model.fit(features)
     anomaly_scores = -model.score_samples(features)
     residuals = np.abs(outcomes - probabilities)
-    ranking = np.argsort(-(anomaly_scores + residuals))[:limit]
+    ranking = np.argsort(-(anomaly_scores + residuals))[offset : offset + limit]
     rows = []
     for index in ranking:
         record = records[int(index)]
@@ -1803,6 +1897,8 @@ def _anomaly_findings(
 
 
 def get_prediction_insights(session: Session, **filters) -> dict:
+    anomaly_limit = min(max(int(filters.pop("anomaly_limit", 12)), 1), 100)
+    anomaly_offset = max(int(filters.pop("anomaly_offset", 0)), 0)
     records = _prediction_records(session, **filters)
     if not records:
         return _empty_prediction_insights()
@@ -1840,7 +1936,15 @@ def get_prediction_insights(session: Session, **filters) -> dict:
             model.coef_[0],
         ),
         "segment_performance": _segment_performance(records, probabilities, outcomes),
-        "anomaly_findings": _anomaly_findings(records, features, probabilities, outcomes),
+        "anomaly_findings": _anomaly_findings(
+            records,
+            features,
+            probabilities,
+            outcomes,
+            limit=anomaly_limit,
+            offset=anomaly_offset,
+        ),
+        "anomaly_total": len(records) if len(records) >= 20 else 0,
         "method_notes": [
             (
                 "Logistic regression estimates the probability that a recommendation "

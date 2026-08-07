@@ -7,11 +7,11 @@
       superset-init:
         condition: service_completed_successfully
     environment:
-      SUPERSET_SECRET_KEY: "change-this-secret-key-before-production-use"
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-local-demo-superset-secret}
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
       DATABASE_DB: superset
       DATABASE_HOST: superset-db
-      DATABASE_PASSWORD: superset
+      DATABASE_PASSWORD: ${SUPERSET_DATABASE_PASSWORD:-local-demo-superset-password}
       DATABASE_USER: superset
       REDIS_HOST: superset-redis
       REDIS_PORT: 6379
@@ -30,19 +30,19 @@
       superset-redis:
         condition: service_healthy
     environment:
-      SUPERSET_SECRET_KEY: "change-this-secret-key-before-production-use"
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-local-demo-superset-secret}
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
       DATABASE_DB: superset
       DATABASE_HOST: superset-db
-      DATABASE_PASSWORD: superset
+      DATABASE_PASSWORD: ${SUPERSET_DATABASE_PASSWORD:-local-demo-superset-password}
       DATABASE_USER: superset
       REDIS_HOST: superset-redis
       REDIS_PORT: 6379
-      ADMIN_USERNAME: admin
+      ADMIN_USERNAME: ${SUPERSET_ADMIN_USERNAME:-admin}
       ADMIN_FIRSTNAME: Superset
       ADMIN_LASTNAME: Admin
-      ADMIN_EMAIL: admin@example.com
-      ADMIN_PASSWORD: admin
+      ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:-local-demo-admin-password}
     volumes:
       - ./superset_config.py:/app/pythonpath/superset_config.py:ro
       - superset_home:/app/superset_home
@@ -71,8 +71,8 @@
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-local-demo-admin-password}
     volumes:
       - grafana_data:/var/lib/grafana
 

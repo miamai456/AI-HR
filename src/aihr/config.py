@@ -4,6 +4,7 @@ from os import getenv
 from pathlib import Path
 from typing import Any
 
+import tomllib
 from pydantic import BaseModel
 
 CONFIG_FILE_ENV = "AIHR_CONFIG_FILE"
@@ -27,6 +28,12 @@ class Settings(BaseModel):
     synthetic_seed_candidates: int = 80_000
     synthetic_seed_jobs: int = 1_500
     synthetic_seed: int = 20260722
+    assistant_provider: str = "deepseek"
+    assistant_base_url: str = "https://api.deepseek.com"
+    assistant_model: str = "deepseek-chat"
+    assistant_api_key: str = ""
+    assistant_cache_ttl_seconds: int = 60
+    assistant_max_attempts: int = 3
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -101,10 +108,32 @@ def _load_env_settings() -> dict[str, str]:
     return values
 
 
+def _load_local_assistant_settings() -> dict[str, str]:
+    secrets_file = _project_root() / ".streamlit" / "secrets.toml"
+    if not secrets_file.exists():
+        return {}
+    try:
+        values = tomllib.loads(secrets_file.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    aliases = {
+        "AIHR_ASSISTANT_PROVIDER": "assistant_provider",
+        "AIHR_ASSISTANT_BASE_URL": "assistant_base_url",
+        "AIHR_ASSISTANT_MODEL": "assistant_model",
+        "AIHR_ASSISTANT_API_KEY": "assistant_api_key",
+    }
+    return {
+        setting_name: str(values[key])
+        for key, setting_name in aliases.items()
+        if values.get(key)
+    }
+
+
 def load_settings(config_file: Path | None = None) -> Settings:
     resolved_config_file = config_file or _resolve_config_file()
     values: dict[str, Any] = {}
     values.update(_load_ini_settings(resolved_config_file))
+    values.update(_load_local_assistant_settings())
     values.update(_load_env_settings())
     return Settings(**values)
 

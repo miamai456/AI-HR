@@ -5,7 +5,7 @@ def env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
-SECRET_KEY = env("SUPERSET_SECRET_KEY", "change-this-secret-key-before-production-use")
+SECRET_KEY = env("SUPERSET_SECRET_KEY", "local-demo-superset-secret")
 
 SQLALCHEMY_DATABASE_URI = (
     "sqlite:////app/superset_home/superset.db"

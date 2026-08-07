@@ -9,8 +9,15 @@ from app.analysis_assistant import (
     answer_question,
     assistant_config_summary,
     assistant_configured,
+    prepare_analysis_context,
+    split_assistant_answer,
 )
 from app.api_client import ALL_OPTION, ApiError, get_filters
+from app.assistant_session import (
+    append_unique_question,
+    clear_conversation,
+    conversation_for_regeneration,
+)
 
 SOURCE_LABELS = {"ai": "AI 推荐", "human": "人工推荐"}
 SOURCE_COLORS = {"ai": "#2563EB", "human": "#E76F51"}
@@ -414,12 +421,47 @@ def render_insight_box(title: str, insights: list[str]) -> None:
     )
 
 
+def render_assistant_message(content: str) -> None:
+    summary, details, body = split_assistant_answer(content)
+    if summary:
+        with st.expander(f"分析依据｜{summary}", expanded=False):
+            st.markdown(details)
+    st.markdown(body)
+    if summary:
+        copy_content = f"{details}\n\n{body}".strip()
+    else:
+        copy_content = body
+    with st.expander("复制回答"):
+        st.code(copy_content, language=None, wrap_lines=True)
+
+
+@st.fragment
 def render_ai_assistant(
     page_key: str,
     page_title: str,
     context: dict,
     starter_questions: list[str] | None = None,
 ) -> None:
+    applied_dates = st.session_state.get(FILTER_DATE_KEY) or []
+    filter_values = {
+        "source": st.session_state.get(FILTER_SOURCE_KEY),
+        "job_category": st.session_state.get(FILTER_JOB_KEY),
+        "region": st.session_state.get(FILTER_REGION_KEY),
+        "model_version": st.session_state.get(FILTER_MODEL_KEY),
+        "recruiter_team": st.session_state.get(FILTER_RECRUITER_KEY),
+    }
+    context = prepare_analysis_context(
+        context,
+        {
+            "start_date": applied_dates[0].isoformat() if len(applied_dates) == 2 else None,
+            "end_date": applied_dates[-1].isoformat() if len(applied_dates) == 2 else None,
+            "filters": {
+                key: value
+                for key, value in filter_values.items()
+                if value and value != ALL_OPTION
+            },
+        },
+    )
     questions = starter_questions or [
         "请解释这页最重要的结论。",
         "有哪些异常或风险需要注意？",
@@ -443,13 +485,52 @@ def render_ai_assistant(
             st.success(f"已连接 {config['provider']}：{config['model']}")
         else:
             st.info(
-                "未配置大模型时使用本地规则分析；配置 DeepSeek、Kimi 或兼容模型后，"
+                "未配置大模型时使用本地规则分析；配置 DeepSeek 或兼容模型后，"
                 "这里会基于当前页面数据进行智能问答。"
             )
 
         message_key = f"aihr_page_assistant_{page_key}"
         if message_key not in st.session_state:
             st.session_state[message_key] = []
+
+        messages = st.session_state[message_key]
+        action_columns = st.columns(3)
+        if action_columns[0].button(
+            "重新分析",
+            icon=":material/refresh:",
+            key=f"{message_key}_refresh",
+        ):
+            refresh_question = "请基于当前筛选条件重新分析，并说明可信度与结论限制。"
+            messages.append({"role": "user", "content": refresh_question})
+            regenerated = conversation_for_regeneration(messages)
+            answer = answer_question(context, regenerated, force_refresh=True)
+            st.session_state[message_key] = [
+                *regenerated,
+                {"role": "assistant", "content": answer},
+            ]
+            st.rerun()
+        if action_columns[1].button(
+            "重新生成",
+            icon=":material/replay:",
+            key=f"{message_key}_regenerate",
+            disabled=not messages,
+        ):
+            regenerated = conversation_for_regeneration(messages)
+            if regenerated:
+                answer = answer_question(context, regenerated, force_refresh=True)
+                st.session_state[message_key] = [
+                    *regenerated,
+                    {"role": "assistant", "content": answer},
+                ]
+                st.rerun()
+        if action_columns[2].button(
+            "清空",
+            icon=":material/delete:",
+            key=f"{message_key}_clear",
+            disabled=not messages,
+        ):
+            clear_conversation(messages)
+            st.rerun()
 
         if not st.session_state[message_key]:
             with st.chat_message("assistant", avatar="🤖"):
@@ -461,10 +542,10 @@ def render_ai_assistant(
         columns = st.columns(len(questions))
         for index, question in enumerate(questions):
             if columns[index].button(question, key=f"{message_key}_q_{index}"):
-                st.session_state[message_key].append({"role": "user", "content": question})
-                answer = answer_question(context, st.session_state[message_key])
-                st.session_state[message_key].append({"role": "assistant", "content": answer})
-                st.rerun()
+                if append_unique_question(messages, question):
+                    answer = answer_question(context, messages)
+                    messages.append({"role": "assistant", "content": answer})
+                    st.rerun()
 
         for message in st.session_state[message_key]:
             avatar = (
@@ -473,7 +554,10 @@ def render_ai_assistant(
                 else "🧑"
             )
             with st.chat_message(message["role"], avatar=avatar):
-                st.markdown(message["content"])
+                if message["role"] == "assistant":
+                    render_assistant_message(message["content"])
+                else:
+                    st.markdown(message["content"])
 
         prompt = st.chat_input(
             f"继续追问{page_title}的数据结论",
@@ -486,7 +570,7 @@ def render_ai_assistant(
             with st.chat_message("assistant", avatar="🤖"):
                 with st.spinner("正在基于本页数据分析..."):
                     answer = answer_question(context, st.session_state[message_key])
-                    st.markdown(answer)
+                    render_assistant_message(answer)
             st.session_state[message_key].append({"role": "assistant", "content": answer})
 
 

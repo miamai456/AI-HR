@@ -285,13 +285,25 @@ if len(date_range) != 2:
     st.warning("请选择完整的开始和结束日期。")
     st.stop()
 
+anomaly_page = st.number_input(
+    "异常样本页码",
+    min_value=1,
+    value=1,
+    step=1,
+    key="aihr_anomaly_page",
+)
 try:
-    result = get_prediction_insights(
-        build_query(date_range, source, job_category, region, model_version, recruiter_team)
+    prediction_query = build_query(
+        date_range, source, job_category, region, model_version, recruiter_team
     )
+    prediction_query["anomaly_limit"] = "12"
+    prediction_query["anomaly_offset"] = str((anomaly_page - 1) * 12)
+    result = get_prediction_insights(prediction_query)
 except ApiError as exc:
     st.error(str(exc))
     st.stop()
+
+st.caption(f"异常样本候选总数：{result.get('anomaly_total', 0):,}，当前第 {anomaly_page} 页")
 
 summary = result["model_summary"]
 bands = prepare_bands(pd.DataFrame(result["probability_bands"]))

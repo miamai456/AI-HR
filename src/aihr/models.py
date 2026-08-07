@@ -1,6 +1,16 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aihr.db import Base
@@ -50,6 +60,16 @@ class ModelVersion(Base):
 
 class Recommendation(Base):
     __tablename__ = "fact_recommendation"
+    __table_args__ = (
+        Index(
+            "ix_recommendation_analysis_filters",
+            "recommended_at",
+            "source",
+            "model_version_id",
+            "recruiter_id",
+            "job_id",
+        ),
+    )
 
     recommendation_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     candidate_id: Mapped[str] = mapped_column(ForeignKey("dim_candidate.candidate_id"), index=True)
@@ -68,6 +88,13 @@ class Recommendation(Base):
 class FunnelEvent(Base):
     __tablename__ = "fact_funnel_event"
     __table_args__ = (
+        Index(
+            "ix_funnel_event_analysis_lookup",
+            "recommendation_id",
+            "stage",
+            "status",
+            "event_at",
+        ),
         UniqueConstraint(
             "recommendation_id",
             "stage",
@@ -89,6 +116,14 @@ class FunnelEvent(Base):
 class DailyFunnelMetric(Base):
     __tablename__ = "mart_daily_funnel"
     __table_args__ = (
+        Index(
+            "ix_daily_funnel_analysis_filters",
+            "metric_date",
+            "source",
+            "job_category",
+            "region",
+            "metric_version",
+        ),
         UniqueConstraint(
             "metric_date",
             "source",

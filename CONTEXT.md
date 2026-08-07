@@ -33,6 +33,8 @@ AIHR 是一个用于评估和监控 AI 招聘推荐效果的分析系统。当�
 - **真实职位市场数据**：外部职位数据，用于表示招聘市场，不包含真实候选人漏斗结果。
 - **实验性漏斗结果**：在缺少真实 ATS 授权导出时，用于方法验证的隐私安全推荐、面试、Offer 和入职结果。
 - **指标字典**：分析字段和指标定义见 `docs/metric_dictionary.md`。
+- **可信度信封**：服务端附加到每条助手结论的样本量、时间范围、数据更新时间、质量状态、置信提示和分析类型。
+- **探索性判断**：样本不足、质量检查失败或质量未知时允许输出的弱结论，不可表述为稳定效果或因果关系。
 
 ## 系统结构
 
@@ -49,6 +51,16 @@ AIHR 是一个用于评估和监控 AI 招聘推荐效果的分析系统。当�
 - 运行 `pytest` 做自动化测试。
 - 运行 `ruff check .` 做代码风格和导入检查。
 - 使用 Docker Compose 验证 API、前端和数据库的集成启动路径。
+
+## Assistant Architecture
+
+- The assistant provider is DeepSeek and is called only by the FastAPI service.
+- Streamlit uses the internal assistant API and never receives the provider key.
+- Assistant responses use the structured fields `conclusion`, `evidence`, `risks`, and `recommendations`.
+- The API owns retry, timeout, provider error mapping, short-lived response caching, and usage logging.
+- The API owns the trust envelope and forces low-confidence answers to exploratory findings.
+- `/api/v1/ready` reports dependency readiness and the running service version.
+- Prediction insights expose paged anomaly findings through `anomaly_limit` and `anomaly_offset`.
 
 ## 决策记录
 

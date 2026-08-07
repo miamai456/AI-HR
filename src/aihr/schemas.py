@@ -6,9 +6,59 @@ from pydantic import BaseModel, Field
 class HealthResponse(BaseModel):
     status: str
     app: str
+    version: str
     environment: str
     database: str
     database_backend: str
+
+
+class ReadyResponse(BaseModel):
+    status: str
+    app: str
+    version: str
+    checks: dict[str, str]
+
+
+class AssistantMessage(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=8_000)
+
+
+class AssistantRequest(BaseModel):
+    context: dict
+    messages: list[AssistantMessage] = Field(min_length=1, max_length=20)
+    force_refresh: bool = False
+
+
+class AssistantTrust(BaseModel):
+    sample_size: int = Field(ge=0)
+    period_start: date | None = None
+    period_end: date | None = None
+    data_updated_at: datetime | None = None
+    data_quality_status: str = Field(pattern="^(pass|warn|fail|unknown)$")
+    confidence: str = Field(pattern="^(low|medium|high)$")
+    confidence_note: str
+    analysis_type: str
+    causal_claim: bool = False
+    filters: dict[str, str]
+
+
+class AssistantResponse(BaseModel):
+    conclusion: str
+    evidence: list[str]
+    risks: list[str]
+    recommendations: list[str]
+    model: str
+    cached: bool = False
+    latency_ms: int
+    total_tokens: int | None = None
+    trust: AssistantTrust
+
+
+class AssistantStatusResponse(BaseModel):
+    configured: bool
+    provider: str
+    model: str
 
 
 class SummaryMetrics(BaseModel):
@@ -282,5 +332,6 @@ class PredictionInsightsResponse(BaseModel):
     top_features: list[FeatureContribution]
     segment_performance: list[SegmentPerformance]
     anomaly_findings: list[AnomalyFinding]
+    anomaly_total: int
     method_notes: list[str]
     data_origin: str

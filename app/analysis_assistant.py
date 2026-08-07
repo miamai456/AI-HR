@@ -1,8 +1,10 @@
 import os
 from typing import Any
 
-import requests
 import streamlit as st
+
+from aihr.services.assistant_trust import build_assistant_trust
+from app.api_client import ApiError, analyze_assistant, get_assistant_status
 
 SYSTEM_PROMPT = """
 你是 AIHR 项目的数据分析助手。你只能基于用户提供的 JSON 分析上下文回答。
@@ -15,6 +17,33 @@ SYSTEM_PROMPT = """
 4. 不编造上下文中不存在的指标、时间、岗位、团队或模型版本。
 5. 回答要先给结论，再给证据，最后给下一步动作。
 """.strip()
+
+TRUST_BLOCK_START = "[[AIHR_TRUST_START]]"
+TRUST_BLOCK_END = "[[AIHR_TRUST_END]]"
+CONFIDENCE_LABELS = {"high": "高", "medium": "中", "low": "低"}
+QUALITY_LABELS = {
+    "pass": "可信",
+    "warn": "需关注",
+    "fail": "不可信",
+    "unknown": "未知",
+}
+FILTER_LABELS = {
+    "source": "推荐来源",
+    "job_category": "岗位",
+    "region": "地区",
+    "model_version": "模型版本",
+    "recruiter_team": "顾问团队",
+}
+FILTER_VALUE_LABELS = {"ai": "AI 推荐", "human": "人工推荐"}
+ANALYSIS_TYPE_LABELS = {
+    "observational_association": "观察性关联分析",
+    "observational_adjusted_association": "调整后的观察性关联分析",
+}
+SOURCE_LABELS = {
+    "DeepSeek": "DeepSeek",
+    "Local rules": "本地规则",
+    "Local rules fallback": "本地规则（DeepSeek 回退）",
+}
 
 
 def assistant_setting(name: str, default: str = "") -> str:
@@ -29,18 +58,28 @@ def assistant_setting(name: str, default: str = "") -> str:
 
 
 def assistant_configured() -> bool:
-    return bool(
-        assistant_setting("AIHR_ASSISTANT_API_KEY")
-        and assistant_setting("AIHR_ASSISTANT_BASE_URL")
-        and assistant_setting("AIHR_ASSISTANT_MODEL")
-    )
+    try:
+        return bool(get_assistant_status().get("configured"))
+    except ApiError:
+        return False
 
 
 def assistant_config_summary() -> dict[str, str]:
+    try:
+        status = get_assistant_status()
+        return {
+            "provider": status.get("provider", "deepseek"),
+            "base_url": "https://api.deepseek.com",
+            "model": status.get("model", "deepseek-chat"),
+        }
+    except ApiError:
+        pass
     return {
-        "provider": assistant_setting("AIHR_ASSISTANT_PROVIDER", "openai-compatible"),
-        "base_url": assistant_setting("AIHR_ASSISTANT_BASE_URL"),
-        "model": assistant_setting("AIHR_ASSISTANT_MODEL"),
+        "provider": assistant_setting("AIHR_ASSISTANT_PROVIDER", "deepseek"),
+        "base_url": assistant_setting(
+            "AIHR_ASSISTANT_BASE_URL", "https://api.deepseek.com"
+        ),
+        "model": assistant_setting("AIHR_ASSISTANT_MODEL", "deepseek-chat"),
     }
 
 
@@ -159,6 +198,19 @@ def _prediction_facts(context: dict[str, Any]) -> list[str]:
     return facts
 
 
+def prepare_analysis_context(
+    context: dict[str, Any],
+    analysis_scope: dict[str, Any],
+) -> dict[str, Any]:
+    prepared = dict(context)
+    prepared["analysis_scope"] = analysis_scope
+    nested_data = prepared.get("data") or {}
+    for name in ("effectiveness", "monitoring", "data_quality", "prediction"):
+        if name not in prepared and name in nested_data:
+            prepared[name] = nested_data[name]
+    return prepared
+
+
 def local_analysis(context: dict[str, Any], question: str) -> str:
     page_name = context.get("page_name", "当前页面")
     facts = [
@@ -199,41 +251,101 @@ def local_analysis(context: dict[str, Any], question: str) -> str:
     )
 
 
-def call_llm(context: dict[str, Any], messages: list[dict[str, str]]) -> str:
-    base_url = assistant_setting("AIHR_ASSISTANT_BASE_URL").rstrip("/")
-    api_key = assistant_setting("AIHR_ASSISTANT_API_KEY")
-    model = assistant_setting("AIHR_ASSISTANT_MODEL")
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "system",
-                "content": f"当前分析上下文 JSON：{context}",
-            },
-            *messages,
-        ],
-    }
-    response = requests.post(
-        f"{base_url}/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json=payload,
-        timeout=60,
-    )
-    response.raise_for_status()
-    data = response.json()
-    return data["choices"][0]["message"]["content"]
+def _format_structured_answer(
+    data: dict[str, Any],
+    *,
+    source: str = "DeepSeek",
+) -> str:
+    trust = data.get("trust") or {}
+    filters = ", ".join(
+        f"{FILTER_LABELS.get(key, key)}={FILTER_VALUE_LABELS.get(value, value)}"
+        for key, value in (trust.get("filters") or {}).items()
+    ) or "全部"
+    trust_lines = []
+    if trust:
+        period = (
+            f"{trust.get('period_start') or 'unknown'} to "
+            f"{trust.get('period_end') or 'unknown'}"
+        )
+        confidence = CONFIDENCE_LABELS.get(trust.get("confidence"), "未知")
+        quality = QUALITY_LABELS.get(trust.get("data_quality_status"), "未知")
+        analysis_type = ANALYSIS_TYPE_LABELS.get(
+            trust.get("analysis_type"), trust.get("analysis_type", "未知")
+        )
+        trust_lines = [
+            TRUST_BLOCK_START,
+            (
+                f"置信度：{confidence}｜样本量：{trust.get('sample_size', 0):,}｜"
+                f"数据质量：{quality}"
+            ),
+            f"- 分析来源：{SOURCE_LABELS.get(source, source)}（{data.get('model', '已配置模型')}）",
+            f"- 时间范围：{period.replace(' to ', ' 至 ')}",
+            f"- 当前筛选：{filters}",
+            f"- 数据更新时间：{trust.get('data_updated_at') or '未知'}",
+            f"- 置信提示：{trust.get('confidence_note', '')}",
+            f"- 分析类型：{analysis_type}",
+            "- 因果声明：不支持因果结论，仅描述观察性关联。",
+            TRUST_BLOCK_END,
+            "",
+        ]
+    sections = [
+        ("结论", data.get("conclusion", "")),
+        ("证据", data.get("evidence", [])),
+        ("风险", data.get("risks", [])),
+        ("建议", data.get("recommendations", [])),
+    ]
+    output = trust_lines
+    for title, value in sections:
+        if isinstance(value, list):
+            output.extend([f"**{title}**", *[f"- {item}" for item in value], ""])
+        else:
+            output.extend([f"**{title}**", str(value), ""])
+    return "\n".join(output).strip()
 
 
-def answer_question(context: dict[str, Any], messages: list[dict[str, str]]) -> str:
+def split_assistant_answer(content: str) -> tuple[str, str, str]:
+    if TRUST_BLOCK_START not in content or TRUST_BLOCK_END not in content:
+        return "", "", content
+    trust_block, body = content.split(TRUST_BLOCK_END, 1)
+    trust_block = trust_block.split(TRUST_BLOCK_START, 1)[1].strip()
+    lines = trust_block.splitlines()
+    summary = lines[0] if lines else ""
+    details = "\n".join(lines[1:]).strip()
+    return summary, details, body.strip()
+
+
+def answer_question(
+    context: dict[str, Any],
+    messages: list[dict[str, str]],
+    *,
+    force_refresh: bool = False,
+) -> str:
     latest_question = messages[-1]["content"] if messages else "请总结当前分析结论。"
     if not assistant_configured():
-        return local_analysis(context, latest_question)
+        return _format_structured_answer(
+            {
+                "conclusion": local_analysis(context, latest_question),
+                "evidence": [],
+                "risks": ["外部模型不可用，当前回答由本地规则生成。"],
+                "recommendations": [],
+                "model": "local-rules",
+                "trust": build_assistant_trust(context),
+            },
+            source="Local rules",
+        )
     try:
-        return call_llm(context, messages)
-    except requests.RequestException as exc:
-        return (
-            "大模型接口暂时不可用，已切换到本地规则分析。\n\n"
-            f"接口错误：{exc}\n\n"
-            f"{local_analysis(context, latest_question)}"
+        return _format_structured_answer(
+            analyze_assistant(context, messages, force_refresh=force_refresh)
+        )
+    except ApiError as exc:
+        return _format_structured_answer(
+            {
+                "conclusion": local_analysis(context, latest_question),
+                "evidence": [],
+                "risks": [f"DeepSeek 暂时不可用：{exc}"],
+                "recommendations": [],
+                "model": "local-rules-fallback",
+                "trust": build_assistant_trust(context),
+            },
+            source="Local rules fallback",
         )

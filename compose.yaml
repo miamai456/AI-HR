@@ -23,13 +23,17 @@ services:
     environment:
       AIHR_CONFIG_FILE: config/config.Online.ini
       AIHR_SEED_DEMO_DATA: "true"
+      AIHR_ASSISTANT_PROVIDER: ${AIHR_ASSISTANT_PROVIDER:-deepseek}
+      AIHR_ASSISTANT_BASE_URL: ${AIHR_ASSISTANT_BASE_URL:-https://api.deepseek.com}
+      AIHR_ASSISTANT_MODEL: ${AIHR_ASSISTANT_MODEL:-deepseek-chat}
+      AIHR_ASSISTANT_API_KEY: ${AIHR_ASSISTANT_API_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
       mysql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/ready')"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -46,6 +50,11 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
   mysql_data:

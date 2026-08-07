@@ -16,6 +16,14 @@ def test_health_and_overview() -> None:
         health = client.get("/api/v1/health")
         assert health.status_code == 200
         assert health.json()["database"] == "ok"
+        assert health.json()["version"] == "0.1.0"
+
+        ready = client.get("/api/v1/ready")
+        assert ready.status_code == 200
+        assert ready.json()["status"] == "ready"
+        assert ready.json()["version"] == "0.1.0"
+        assert ready.json()["checks"]["database"] == "ready"
+        assert ready.json()["checks"]["assistant"] in {"configured", "optional"}
 
         overview = client.get("/api/v1/overview")
         assert overview.status_code == 200
@@ -295,3 +303,15 @@ def test_data_quality_reports_structured_layer_freshness_and_checks() -> None:
         assert check["sample_size"] >= check["affected_count"]
         assert check["period_start"] <= check["period_end"]
         assert isinstance(check["details"], dict)
+
+
+def test_data_quality_reports_freshness_duplicate_and_anomaly_ratio_alerts() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/data-quality")
+
+    assert response.status_code == 200
+    checks = {check["check_type"]: check for check in response.json()["checks"]}
+    assert {"data_freshness", "duplicate_data", "anomaly_ratio"} <= set(checks)
+    assert checks["data_freshness"]["details"]["latest_data_at"]
+    assert checks["duplicate_data"]["evidence_metric"] == "duplicate_record_groups"
+    assert 0 <= checks["anomaly_ratio"]["details"]["anomaly_ratio"] <= 1
