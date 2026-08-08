@@ -2,6 +2,7 @@ from app.analysis_assistant import (
     _format_structured_answer,
     answer_question,
     assistant_config_summary,
+    format_streamed_answer,
     prepare_analysis_context,
     split_assistant_answer,
 )
@@ -113,3 +114,28 @@ def test_embedded_context_is_normalized_with_current_filter_scope() -> None:
     assert context["effectiveness"]["ai_sample_size"] == 40
     assert context["data_quality"]["summary"]["warning_checks"] == 1
     assert context["analysis_scope"]["filters"] == {"source": "ai"}
+
+
+def test_streamed_answer_keeps_chinese_trust_metadata_collapsible() -> None:
+    answer = format_streamed_answer(
+        "## 结论\n当前结果仅支持观察性判断。",
+        {
+            "model": "deepseek-chat",
+            "trust": {
+                "sample_size": 120,
+                "confidence": "medium",
+                "data_quality_status": "warn",
+                "period_start": "2026-01-01",
+                "period_end": "2026-06-30",
+                "filters": {"source": "ai"},
+                "confidence_note": "结论需要谨慎使用。",
+            },
+        },
+    )
+
+    summary, details, body = split_assistant_answer(answer)
+
+    assert summary == "置信度：中｜样本量：120｜数据质量：需关注"
+    assert "因果声明：不支持因果结论" in details
+    assert "推荐来源=AI 推荐" in details
+    assert body.startswith("## 结论")

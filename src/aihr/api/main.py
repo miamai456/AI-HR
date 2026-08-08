@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -7,6 +8,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import Session
@@ -15,6 +17,7 @@ from aihr import __version__
 from aihr.config import get_settings
 from aihr.database import Base, create_engine_and_session, get_db
 from aihr.schemas import (
+    AssistantContextResponse,
     AssistantRequest,
     AssistantResponse,
     AssistantStatusResponse,
@@ -40,6 +43,7 @@ from aihr.services.analytics import (
 )
 from aihr.services.assistant import AssistantClient, AssistantService, AssistantServiceError
 from aihr.services.assistant_trust import apply_trust_guard, build_assistant_trust
+from aihr.services.cache import TTLCache
 
 DbSession = Annotated[Session, Depends(get_db)]
 LOGGER = logging.getLogger(__name__)
@@ -54,6 +58,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     resolved_database_url = database_url or settings.database_url
     engine, session_factory = create_engine_and_session(resolved_database_url)
     prediction_cache: dict[tuple, tuple[float, dict]] = {}
+    assistant_context_cache: TTLCache[dict] = TTLCache(ttl_seconds=300, max_entries=128)
     assistant_service = None
     if settings.assistant_api_key and not settings.assistant_api_key.startswith("replace-with-"):
         assistant_service = AssistantService(
@@ -92,6 +97,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     application.state.engine = engine
     application.state.session_factory = session_factory
     application.state.assistant_service = assistant_service
+    application.state.assistant_context_cache = assistant_context_cache
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -147,6 +153,56 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "model": settings.assistant_model,
         }
 
+    @application.get(
+        "/api/v1/assistant/context",
+        response_model=AssistantContextResponse,
+        tags=["assistant"],
+    )
+    def assistant_context(
+        session: DbSession,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        source: str | None = Query(default=None, pattern="^(ai|human)$"),
+        job_category: str | None = None,
+        region: str | None = None,
+        model_version: str | None = None,
+        recruiter_team: str | None = None,
+    ) -> dict:
+        filters = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "source": source,
+            "job_category": job_category,
+            "region": region,
+            "model_version": model_version,
+            "recruiter_team": recruiter_team,
+        }
+        cache_key = ("assistant_context", *filters.items())
+
+        def load_context() -> dict:
+            active_filters = {
+                key: value
+                for key, value in filters.items()
+                if key not in {"start_date", "end_date"} and value is not None
+            }
+            return {
+                "analysis_scope": {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "filters": active_filters,
+                },
+                "overview": get_overview(session, **filters),
+                "effectiveness": get_effectiveness(session, **filters),
+                "monitoring": get_monitoring(session, **filters),
+                "data_quality": get_data_quality(session, **filters),
+                "prediction": get_prediction_insights(session, **filters),
+            }
+
+        context, cached, latency_ms = assistant_context_cache.get_or_load(
+            cache_key, load_context
+        )
+        return {**context, "cached": cached, "latency_ms": latency_ms}
+
     @application.post(
         "/api/v1/assistant/analyze",
         response_model=AssistantResponse,
@@ -196,6 +252,48 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "total_tokens": answer.total_tokens,
             "trust": trust,
         }
+
+    @application.post("/api/v1/assistant/analyze/stream", tags=["assistant"])
+    def assistant_analyze_stream(request: AssistantRequest) -> StreamingResponse:
+        service = application.state.assistant_service
+        if service is None:
+            raise HTTPException(status_code=503, detail="AI assistant is not configured")
+
+        messages = [message.model_dump() for message in request.messages]
+        trust = build_assistant_trust(request.context)
+
+        def event(event_name: str, payload: dict) -> str:
+            return (
+                f"event: {event_name}\n"
+                f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+            )
+
+        def generate():
+            yield event(
+                "metadata",
+                {"model": settings.assistant_model, "trust": trust},
+            )
+            parts: list[str] = []
+            try:
+                for part in service.stream_markdown(request.context, messages):
+                    parts.append(part)
+                    yield event("delta", {"content": part})
+                yield event(
+                    "done",
+                    {"content": "".join(parts), "model": settings.assistant_model, "trust": trust},
+                )
+            except AssistantServiceError as exc:
+                LOGGER.warning("assistant_stream_failed status_code=%s", exc.status_code)
+                yield event(
+                    "error",
+                    {"detail": str(exc), "status_code": exc.status_code},
+                )
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @application.get("/api/v1/meta/filters", response_model=FilterOptions, tags=["analytics"])
     def filters(session: DbSession) -> dict:

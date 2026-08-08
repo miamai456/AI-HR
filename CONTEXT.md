@@ -61,6 +61,9 @@ AIHR 是一个用于评估和监控 AI 招聘推荐效果的分析系统。当�
 - The API owns the trust envelope and forces low-confidence answers to exploratory findings.
 - `/api/v1/ready` reports dependency readiness and the running service version.
 - Prediction insights expose paged anomaly findings through `anomaly_limit` and `anomaly_offset`.
+- `/api/v1/assistant/context` returns one filter-consistent analysis snapshot and caches it for 60 seconds.
+- `/api/v1/assistant/analyze/stream` uses SSE events named `metadata`, `delta`, `done`, and `error`.
+- Streamed answers use Chinese Markdown sections while the non-streaming API retains the JSON response contract.
 
 ## 决策记录
 

@@ -61,6 +61,17 @@ class AssistantStatusResponse(BaseModel):
     model: str
 
 
+class AssistantContextResponse(BaseModel):
+    analysis_scope: dict
+    overview: dict
+    effectiveness: dict
+    monitoring: dict
+    data_quality: dict
+    prediction: dict
+    cached: bool
+    latency_ms: int
+
+
 class SummaryMetrics(BaseModel):
     recommended: int
     contacted: int

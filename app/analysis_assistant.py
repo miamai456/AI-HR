@@ -4,7 +4,12 @@ from typing import Any
 import streamlit as st
 
 from aihr.services.assistant_trust import build_assistant_trust
-from app.api_client import ApiError, analyze_assistant, get_assistant_status
+from app.api_client import (
+    ApiError,
+    analyze_assistant,
+    get_assistant_status,
+    stream_assistant,
+)
 
 SYSTEM_PROMPT = """
 你是 AIHR 项目的数据分析助手。你只能基于用户提供的 JSON 分析上下文回答。
@@ -349,3 +354,72 @@ def answer_question(
             },
             source="Local rules fallback",
         )
+
+
+def stream_answer_question(
+    context: dict[str, Any], messages: list[dict[str, str]]
+):
+    if not assistant_configured():
+        question = messages[-1]["content"] if messages else "请总结当前分析结论。"
+        yield {
+            "event": "done",
+            "content": local_analysis(context, question),
+            "trust": build_assistant_trust(context),
+        }
+        return
+    try:
+        for event in stream_assistant(context, messages):
+            if event.get("event") != "error":
+                yield event
+                continue
+            yield event
+            question = messages[-1]["content"] if messages else "请总结当前分析结论。"
+            yield {
+                "event": "done",
+                "content": local_analysis(context, question),
+                "trust": build_assistant_trust(context),
+                "fallback": True,
+            }
+            return
+    except ApiError as exc:
+        question = messages[-1]["content"] if messages else "请总结当前分析结论。"
+        yield {
+            "event": "done",
+            "content": local_analysis(context, question),
+            "trust": build_assistant_trust(context),
+            "fallback": True,
+            "error": str(exc),
+        }
+
+
+def format_streamed_answer(content: str, metadata: dict[str, Any]) -> str:
+    trust = metadata.get("trust") or {}
+    confidence = {"high": "高", "medium": "中", "low": "低"}.get(
+        trust.get("confidence"), "未知"
+    )
+    quality = {"pass": "可信", "warn": "需关注", "fail": "不可信"}.get(
+        trust.get("data_quality_status"), "未知"
+    )
+    filters = trust.get("filters") or {}
+    filter_text = "、".join(
+        f"{FILTER_LABELS.get(key, key)}={FILTER_VALUE_LABELS.get(value, value)}"
+        for key, value in filters.items()
+    ) or "全部"
+    trust_block = [
+        TRUST_BLOCK_START,
+        f"置信度：{confidence}｜样本量：{trust.get('sample_size', 0):,}｜数据质量：{quality}",
+        (
+            "- 分析来源：本地规则（DeepSeek 回退）"
+            if metadata.get("fallback")
+            else f"- 分析来源：DeepSeek（{metadata.get('model', 'deepseek-chat')}）"
+        ),
+        f"- 时间范围：{trust.get('period_start') or '未知'} 至 {trust.get('period_end') or '未知'}",
+        f"- 当前筛选：{filter_text}",
+        f"- 数据更新时间：{trust.get('data_updated_at') or '未知'}",
+        f"- 置信提示：{trust.get('confidence_note', '')}",
+        "- 分析类型：观察性关联分析",
+        "- 因果声明：不支持因果结论，仅描述观察到的关联。",
+        TRUST_BLOCK_END,
+        "",
+    ]
+    return "\n".join([*trust_block, content]).strip()

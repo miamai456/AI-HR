@@ -4,15 +4,13 @@ from app.analysis_assistant import (
     answer_question,
     assistant_config_summary,
     assistant_configured,
+    format_streamed_answer,
+    stream_answer_question,
 )
 from app.api_client import (
     ApiError,
     build_query,
-    get_data_quality,
-    get_effectiveness,
-    get_monitoring_with_filters,
-    get_overview,
-    get_prediction_insights,
+    get_assistant_context,
 )
 from app.assistant_session import (
     append_unique_question,
@@ -29,24 +27,7 @@ QUICK_QUESTIONS = [
 
 
 def build_analysis_context(query: dict[str, str]) -> dict:
-    data_quality = get_data_quality(query)
-    filters = {
-        key: value
-        for key, value in query.items()
-        if key not in {"start_date", "end_date"} and value
-    }
-    return {
-        "analysis_scope": {
-            "start_date": query.get("start_date"),
-            "end_date": query.get("end_date"),
-            "filters": filters,
-        },
-        "overview": get_overview(query),
-        "effectiveness": get_effectiveness(query),
-        "monitoring": get_monitoring_with_filters(query),
-        "data_quality": data_quality,
-        "prediction": get_prediction_insights(query),
-    }
+    return get_assistant_context(query)
 
 
 configure_page("AI 分析助手")
@@ -153,9 +134,25 @@ if prompt:
     with st.chat_message("user", avatar="🧑"):
         st.markdown(prompt)
     with st.chat_message("assistant", avatar="🤖"):
-        with st.spinner("正在分析当前看板上下文..."):
-            answer = answer_question(context, st.session_state.aihr_assistant_messages)
-            render_assistant_message(answer)
+        live_answer = st.empty()
+        streamed = ""
+        metadata = {}
+        for event in stream_answer_question(
+            context, st.session_state.aihr_assistant_messages
+        ):
+            if event.get("event") == "metadata":
+                metadata = event
+            elif event.get("event") == "delta":
+                streamed += event.get("content", "")
+                live_answer.markdown(streamed + "|")
+            elif event.get("event") == "done":
+                streamed = event.get("content", streamed)
+                metadata = {**metadata, **event}
+            elif event.get("event") == "error":
+                st.error(event.get("detail", "流式分析失败"))
+        answer = format_streamed_answer(streamed, metadata)
+        live_answer.empty()
+        render_assistant_message(answer)
     st.session_state.aihr_assistant_messages.append(
         {"role": "assistant", "content": answer}
     )

@@ -33,6 +33,34 @@ def test_health_and_overview() -> None:
         assert payload["data_origin"] == "synthetic"
 
 
+def test_assistant_context_returns_one_consistent_cached_analysis_snapshot() -> None:
+    params = {
+        "start_date": "2026-01-01",
+        "end_date": "2026-06-30",
+        "source": "ai",
+    }
+    with TestClient(app) as client:
+        first = client.get("/api/v1/assistant/context", params=params)
+        second = client.get("/api/v1/assistant/context", params=params)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    payload = first.json()
+    assert payload["analysis_scope"] == {
+        "start_date": "2026-01-01",
+        "end_date": "2026-06-30",
+        "filters": {"source": "ai"},
+    }
+    assert {"overview", "effectiveness", "monitoring", "data_quality", "prediction"} <= set(
+        payload
+    )
+    assert payload["overview"]["summary"]["recommended"] > 0
+    assert payload["cached"] is False
+    assert payload["latency_ms"] > 0
+    assert second.json()["cached"] is True
+    assert second.json()["latency_ms"] == 0
+
+
 def test_overview_supports_unified_filters_and_executive_metrics() -> None:
     with TestClient(app) as client:
         filters = client.get("/api/v1/meta/filters")
