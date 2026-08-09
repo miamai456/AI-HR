@@ -84,6 +84,7 @@ function Start-OrReuseAihrProcess {
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
 $env:AIHR_CONFIG_FILE = "config/config.ini"
 $env:AIHR_API_URL = "http://127.0.0.1:8000/api/v1"
+$env:AIHR_ANALYSIS_PREWARM = "true"
 
 $api = Start-OrReuseAihrProcess `
     -Name "API" `

@@ -4,9 +4,10 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date
+from threading import Thread
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
@@ -32,6 +33,11 @@ from aihr.schemas import (
     ReadyResponse,
 )
 from aihr.seed import SyntheticHiringConfig, seed_demo_metrics
+from aihr.services.analysis_context import AnalysisContextService
+from aihr.services.analysis_snapshots import (
+    DatabaseAnalysisSnapshotStore,
+    get_dataset_version,
+)
 from aihr.services.analytics import (
     get_data_quality,
     get_effectiveness,
@@ -43,7 +49,8 @@ from aihr.services.analytics import (
 )
 from aihr.services.assistant import AssistantClient, AssistantService, AssistantServiceError
 from aihr.services.assistant_trust import apply_trust_guard, build_assistant_trust
-from aihr.services.cache import TTLCache
+from aihr.services.cache import create_json_cache
+from aihr.services.metrics import MetricsRegistry
 
 DbSession = Annotated[Session, Depends(get_db)]
 LOGGER = logging.getLogger(__name__)
@@ -58,7 +65,43 @@ def create_app(database_url: str | None = None) -> FastAPI:
     resolved_database_url = database_url or settings.database_url
     engine, session_factory = create_engine_and_session(resolved_database_url)
     prediction_cache: dict[tuple, tuple[float, dict]] = {}
-    assistant_context_cache: TTLCache[dict] = TTLCache(ttl_seconds=300, max_entries=128)
+    shared_cache = create_json_cache(settings.cache_url, prefix=settings.cache_prefix)
+    metrics = MetricsRegistry()
+    snapshot_store = DatabaseAnalysisSnapshotStore(session_factory)
+
+    def load_dataset_version() -> str:
+        with session_factory() as session:
+            return get_dataset_version(session)
+
+    def load_analysis_context(filters: dict) -> dict:
+        start_date = filters.get("start_date")
+        end_date = filters.get("end_date")
+        active_filters = {
+            key: value
+            for key, value in filters.items()
+            if key not in {"start_date", "end_date"} and value is not None
+        }
+        with session_factory() as session:
+            return {
+                "analysis_scope": {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "filters": active_filters,
+                },
+                "overview": get_overview(session, **filters),
+                "effectiveness": get_effectiveness(session, **filters),
+                "monitoring": get_monitoring(session, **filters),
+                "data_quality": get_data_quality(session, **filters),
+                "prediction": get_prediction_insights(session, **filters),
+            }
+
+    analysis_context_service = AnalysisContextService(
+        load_analysis_context,
+        shared_cache,
+        ttl_seconds=settings.analysis_context_cache_ttl_seconds,
+        snapshot_store=snapshot_store,
+        dataset_version_loader=load_dataset_version,
+    )
     assistant_service = None
     if settings.assistant_api_key and not settings.assistant_api_key.startswith("replace-with-"):
         assistant_service = AssistantService(
@@ -69,6 +112,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 max_attempts=settings.assistant_max_attempts,
             ),
             ttl_seconds=settings.assistant_cache_ttl_seconds,
+            cache_backend=shared_cache,
         )
 
     @asynccontextmanager
@@ -85,6 +129,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
                         n_recommendations=settings.synthetic_seed_recommendations,
                     ),
                 )
+        if settings.analysis_prewarm:
+            Thread(
+                target=analysis_context_service.prewarm,
+                args=([{}, {"source": "ai"}, {"source": "human"}],),
+                name="aihr-analysis-prewarm",
+                daemon=True,
+            ).start()
         yield
         engine.dispose()
 
@@ -97,7 +148,9 @@ def create_app(database_url: str | None = None) -> FastAPI:
     application.state.engine = engine
     application.state.session_factory = session_factory
     application.state.assistant_service = assistant_service
-    application.state.assistant_context_cache = assistant_context_cache
+    application.state.analysis_context_service = analysis_context_service
+    application.state.cache_backend = shared_cache
+    application.state.metrics = metrics
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -105,6 +158,27 @@ def create_app(database_url: str | None = None) -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    @application.middleware("http")
+    async def record_http_metrics(request: Request, call_next):
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            metrics.record(
+                f"http:{request.method}:{request.url.path}",
+                latency_ms=round((time.perf_counter() - started) * 1000),
+                success=False,
+                error_code="exception",
+            )
+            raise
+        metrics.record(
+            f"http:{request.method}:{request.url.path}",
+            latency_ms=round((time.perf_counter() - started) * 1000),
+            success=response.status_code < 400,
+            error_code=response.status_code if response.status_code >= 400 else None,
+        )
+        return response
 
     @application.get("/api/v1/health", response_model=HealthResponse, tags=["system"])
     def health(session: DbSession) -> dict:
@@ -138,7 +212,16 @@ def create_app(database_url: str | None = None) -> FastAPI:
                     if application.state.assistant_service is not None
                     else "optional"
                 ),
+                "cache": getattr(shared_cache, "backend_name", "unknown"),
             },
+        }
+
+    @application.get("/api/v1/metrics/performance", tags=["system"])
+    def performance_metrics() -> dict:
+        return {
+            "service_version": __version__,
+            "started_at": metrics.started_at,
+            "operations": metrics.snapshot(),
         }
 
     @application.get(
@@ -159,7 +242,6 @@ def create_app(database_url: str | None = None) -> FastAPI:
         tags=["assistant"],
     )
     def assistant_context(
-        session: DbSession,
         start_date: date | None = None,
         end_date: date | None = None,
         source: str | None = Query(default=None, pattern="^(ai|human)$"),
@@ -177,31 +259,24 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "model_version": model_version,
             "recruiter_team": recruiter_team,
         }
-        cache_key = ("assistant_context", *filters.items())
-
-        def load_context() -> dict:
-            active_filters = {
-                key: value
-                for key, value in filters.items()
-                if key not in {"start_date", "end_date"} and value is not None
-            }
-            return {
-                "analysis_scope": {
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "filters": active_filters,
-                },
-                "overview": get_overview(session, **filters),
-                "effectiveness": get_effectiveness(session, **filters),
-                "monitoring": get_monitoring(session, **filters),
-                "data_quality": get_data_quality(session, **filters),
-                "prediction": get_prediction_insights(session, **filters),
-            }
-
-        context, cached, latency_ms = assistant_context_cache.get_or_load(
-            cache_key, load_context
+        context, cached, latency_ms = analysis_context_service.get(filters)
+        metrics.record(
+            "analysis_context",
+            latency_ms=latency_ms,
+            success=True,
+            cached=cached,
         )
         return {**context, "cached": cached, "latency_ms": latency_ms}
+
+    @application.get("/api/v1/assistant/context/status", tags=["assistant"])
+    def assistant_context_status() -> dict:
+        dataset_version = load_dataset_version()
+        return {
+            "dataset_version": dataset_version,
+            "prewarm": analysis_context_service.status(),
+            "materialized": snapshot_store.status(dataset_version),
+            "cache_backend": getattr(shared_cache, "backend_name", "unknown"),
+        }
 
     @application.post(
         "/api/v1/assistant/analyze",
@@ -224,6 +299,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
             )
         except AssistantServiceError as exc:
             status_code = exc.status_code
+            metrics.record(
+                "assistant_analyze",
+                latency_ms=round((time.perf_counter() - started) * 1000),
+                success=False,
+                error_code=status_code or "provider_error",
+            )
             LOGGER.warning("assistant_request_failed status_code=%s", status_code)
             if status_code == 401:
                 raise HTTPException(
@@ -241,6 +322,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
         total_latency_ms = latency_ms or round((time.perf_counter() - started) * 1000)
         trust = build_assistant_trust(request.context)
         answer = apply_trust_guard(answer, trust)
+        metrics.record(
+            "assistant_analyze",
+            latency_ms=total_latency_ms,
+            success=True,
+            cached=cached,
+            tokens=0 if cached else answer.total_tokens,
+        )
         return {
             "conclusion": answer.conclusion,
             "evidence": answer.evidence,
@@ -269,6 +357,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
             )
 
         def generate():
+            started = time.perf_counter()
+            first_delta_recorded = False
             yield event(
                 "metadata",
                 {"model": settings.assistant_model, "trust": trust},
@@ -276,13 +366,31 @@ def create_app(database_url: str | None = None) -> FastAPI:
             parts: list[str] = []
             try:
                 for part in service.stream_markdown(request.context, messages):
+                    if not first_delta_recorded:
+                        metrics.record(
+                            "assistant_stream_ttft",
+                            latency_ms=round((time.perf_counter() - started) * 1000),
+                            success=True,
+                        )
+                        first_delta_recorded = True
                     parts.append(part)
                     yield event("delta", {"content": part})
+                metrics.record(
+                    "assistant_stream_total",
+                    latency_ms=round((time.perf_counter() - started) * 1000),
+                    success=True,
+                )
                 yield event(
                     "done",
                     {"content": "".join(parts), "model": settings.assistant_model, "trust": trust},
                 )
             except AssistantServiceError as exc:
+                metrics.record(
+                    "assistant_stream_total",
+                    latency_ms=round((time.perf_counter() - started) * 1000),
+                    success=False,
+                    error_code=exc.status_code or "provider_error",
+                )
                 LOGGER.warning("assistant_stream_failed status_code=%s", exc.status_code)
                 yield event(
                     "error",

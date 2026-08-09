@@ -15,6 +15,7 @@ from aihr.models import (
     Recommendation,
     Recruiter,
 )
+from aihr.services.analysis_snapshots import bump_dataset_version, get_dataset_version
 
 STAGES = ["recommended", "contacted", "replied", "interviewed", "offered", "hired"]
 JOB_CATEGORIES = ["技术", "销售", "运营"]
@@ -192,6 +193,9 @@ def seed_demo_metrics(
 ) -> int:
     existing_recommendations = session.scalar(select(func.count()).select_from(Recommendation))
     if existing_recommendations:
+        if get_dataset_version(session) == "unversioned":
+            bump_dataset_version(session, reason="existing_hiring_facts")
+            session.commit()
         return 0
 
     config = config or SyntheticHiringConfig(seed=seed)
@@ -320,6 +324,7 @@ def seed_demo_metrics(
             ]
         )
 
+    bump_dataset_version(session, reason=f"seed:{config.batch_id}")
     session.commit()
     return len(recommendations)
 

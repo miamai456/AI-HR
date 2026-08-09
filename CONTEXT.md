@@ -64,6 +64,13 @@ AIHR 是一个用于评估和监控 AI 招聘推荐效果的分析系统。当�
 - `/api/v1/assistant/context` returns one filter-consistent analysis snapshot and caches it for 60 seconds.
 - `/api/v1/assistant/analyze/stream` uses SSE events named `metadata`, `delta`, `done`, and `error`.
 - Streamed answers use Chinese Markdown sections while the non-streaming API retains the JSON response contract.
+- Analysis snapshots and structured assistant answers use a shared JSON cache; Compose provides Redis with AOF persistence.
+- Local development falls back to an in-process cache and can prewarm common unfiltered, AI, and human scopes.
+- `/api/v1/metrics/performance` reports request and assistant latency percentiles, cache hit rates, tokens, and errors.
+- `scripts/run-assistant-eval.py` runs the fixed assistant quality cases against a live API.
+- Common assistant analysis scopes are materialized in `mart_analysis_context_snapshot` and keyed by the hiring-facts dataset version.
+- `system_data_version` is the cache invalidation boundary for hiring recommendation and funnel facts.
+- `/api/v1/assistant/context/status` reports dataset version, prewarm progress, materialized snapshot counts, and cache backend.
 
 ## 决策记录
 

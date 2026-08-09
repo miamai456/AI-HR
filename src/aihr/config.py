@@ -34,6 +34,10 @@ class Settings(BaseModel):
     assistant_api_key: str = ""
     assistant_cache_ttl_seconds: int = 60
     assistant_max_attempts: int = 3
+    cache_url: str = ""
+    cache_prefix: str = "aihr"
+    analysis_context_cache_ttl_seconds: int = 300
+    analysis_prewarm: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:

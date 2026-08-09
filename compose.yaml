@@ -1,4 +1,15 @@
 services:
+  cache:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   mysql:
     image: mysql:8.4
     environment:
@@ -27,10 +38,16 @@ services:
       AIHR_ASSISTANT_BASE_URL: ${AIHR_ASSISTANT_BASE_URL:-https://api.deepseek.com}
       AIHR_ASSISTANT_MODEL: ${AIHR_ASSISTANT_MODEL:-deepseek-chat}
       AIHR_ASSISTANT_API_KEY: ${AIHR_ASSISTANT_API_KEY:-}
+      AIHR_ASSISTANT_CACHE_TTL_SECONDS: "300"
+      AIHR_CACHE_URL: redis://cache:6379/0
+      AIHR_ANALYSIS_CONTEXT_CACHE_TTL_SECONDS: "300"
+      AIHR_ANALYSIS_PREWARM: "true"
     ports:
       - "8000:8000"
     depends_on:
       mysql:
+        condition: service_healthy
+      cache:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/ready')"]
@@ -58,3 +75,4 @@ services:
 
 volumes:
   mysql_data:
+  redis_data:

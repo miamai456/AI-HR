@@ -1,6 +1,12 @@
 import requests
 
-from aihr.services.assistant import AssistantClient, AssistantService, AssistantServiceError
+from aihr.services.assistant import (
+    AssistantAnswer,
+    AssistantClient,
+    AssistantService,
+    AssistantServiceError,
+)
+from aihr.services.cache import MemoryJsonCache
 
 
 def test_assistant_client_returns_structured_answer() -> None:
@@ -147,3 +153,30 @@ def test_assistant_service_force_refresh_bypasses_cached_answer() -> None:
     assert first_cached is False
     assert second_cached is True
     assert refreshed_cached is False
+
+
+def test_assistant_service_reuses_shared_cache_across_instances() -> None:
+    class Client:
+        model = "deepseek-chat"
+
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, context, messages):
+            self.calls += 1
+            return AssistantAnswer("answer", [], [], [], total_tokens=10)
+
+    cache = MemoryJsonCache()
+    client = Client()
+    first_service = AssistantService(client, cache_backend=cache)
+    second_service = AssistantService(client, cache_backend=cache)
+
+    first_service.analyze({}, [{"role": "user", "content": "Q"}])
+    answer, cached, latency_ms = second_service.analyze(
+        {}, [{"role": "user", "content": "Q"}]
+    )
+
+    assert answer.conclusion == "answer"
+    assert cached is True
+    assert latency_ms == 0
+    assert client.calls == 1

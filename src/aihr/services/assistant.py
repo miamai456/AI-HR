@@ -2,12 +2,14 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 from threading import Lock
 from typing import Any
 
 import requests
+
+from aihr.services.cache import JsonCache
 
 LOGGER = logging.getLogger(__name__)
 SYSTEM_PROMPT = """
@@ -197,10 +199,18 @@ class AssistantClient:
 
 
 class AssistantService:
-    def __init__(self, client: AssistantClient, *, ttl_seconds: int = 60, max_entries: int = 128):
+    def __init__(
+        self,
+        client: AssistantClient,
+        *,
+        ttl_seconds: int = 60,
+        max_entries: int = 128,
+        cache_backend: JsonCache | None = None,
+    ):
         self.client = client
         self.ttl_seconds = ttl_seconds
         self.max_entries = max_entries
+        self.cache_backend = cache_backend
         self._cache: dict[str, tuple[float, AssistantAnswer]] = {}
         self._lock = Lock()
 
@@ -220,6 +230,10 @@ class AssistantService:
         ).hexdigest()
         now = time.monotonic()
         if not force_refresh:
+            if self.cache_backend is not None:
+                persisted = self.cache_backend.get(f"assistant-answer:{cache_key}")
+                if persisted is not None:
+                    return AssistantAnswer(**persisted), True, 0
             with self._lock:
                 cached = self._cache.get(cache_key)
                 if cached and now - cached[0] < self.ttl_seconds:
@@ -233,6 +247,12 @@ class AssistantService:
             if len(self._cache) > self.max_entries:
                 oldest_key = min(self._cache, key=lambda key: self._cache[key][0])
                 self._cache.pop(oldest_key, None)
+        if self.cache_backend is not None:
+            self.cache_backend.set(
+                f"assistant-answer:{cache_key}",
+                asdict(answer),
+                ttl_seconds=self.ttl_seconds,
+            )
         LOGGER.info(
             "assistant_request model=%s latency_ms=%s total_tokens=%s cached=false",
             self.client.model,

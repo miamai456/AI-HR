@@ -32,6 +32,11 @@ def test_health_and_overview() -> None:
         assert 0 <= payload["summary"]["interview_rate"] <= 1
         assert payload["data_origin"] == "synthetic"
 
+        metrics = client.get("/api/v1/metrics/performance")
+        assert metrics.status_code == 200
+        assert metrics.json()["service_version"] == "0.1.0"
+        assert metrics.json()["operations"]
+
 
 def test_assistant_context_returns_one_consistent_cached_analysis_snapshot() -> None:
     params = {
@@ -42,6 +47,7 @@ def test_assistant_context_returns_one_consistent_cached_analysis_snapshot() -> 
     with TestClient(app) as client:
         first = client.get("/api/v1/assistant/context", params=params)
         second = client.get("/api/v1/assistant/context", params=params)
+        status = client.get("/api/v1/assistant/context/status")
 
     assert first.status_code == 200
     assert second.status_code == 200
@@ -59,6 +65,10 @@ def test_assistant_context_returns_one_consistent_cached_analysis_snapshot() -> 
     assert payload["latency_ms"] > 0
     assert second.json()["cached"] is True
     assert second.json()["latency_ms"] == 0
+
+    assert status.status_code == 200
+    assert status.json()["dataset_version"] != "unversioned"
+    assert status.json()["materialized"]["current_snapshots"] >= 1
 
 
 def test_overview_supports_unified_filters_and_executive_metrics() -> None:
