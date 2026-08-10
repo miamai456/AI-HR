@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 
+from aihr.api import main
 from aihr.api.main import app, database_backend_for_url
+from aihr.config import Settings
 
 
 def test_database_backend_for_url_reports_driver_backend() -> None:
@@ -9,6 +11,14 @@ def test_database_backend_for_url_reports_driver_backend() -> None:
         database_backend_for_url("postgresql+psycopg://aihr_app:345678@localhost:5432/aihr")
         == "postgresql"
     )
+
+
+def test_root_redirects_to_interactive_api_docs() -> None:
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.get("/")
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/docs"
 
 
 def test_health_and_overview() -> None:
@@ -36,6 +46,11 @@ def test_health_and_overview() -> None:
         assert metrics.status_code == 200
         assert metrics.json()["service_version"] == "0.1.0"
         assert metrics.json()["operations"]
+
+        prometheus = client.get("/metrics")
+        assert prometheus.status_code == 200
+        assert "aihr_http_requests_total" in prometheus.text
+        assert 'path="/api/v1/ready"' in prometheus.text
 
 
 def test_assistant_context_returns_one_consistent_cached_analysis_snapshot() -> None:
@@ -68,7 +83,43 @@ def test_assistant_context_returns_one_consistent_cached_analysis_snapshot() -> 
 
     assert status.status_code == 200
     assert status.json()["dataset_version"] != "unversioned"
+    assert status.json()["prewarm"]["mode"] in {"disabled", "local", "queue"}
     assert status.json()["materialized"]["current_snapshots"] >= 1
+
+
+def test_dashboard_overview_returns_the_cached_analysis_snapshot() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/dashboard/overview", params={"source": "ai"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {"overview", "effectiveness", "monitoring", "data_quality"} <= set(payload)
+    assert "prediction" not in payload
+    assert payload["analysis_scope"]["filters"] == {"source": "ai"}
+
+
+def test_online_operations_endpoints_require_bearer_token(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main,
+        "get_settings",
+        lambda: Settings(
+            environment="online",
+            seed_demo_data=False,
+            operations_token="operations-secret",
+        ),
+    )
+    protected_app = main.create_app("sqlite+pysqlite:///:memory:")
+
+    with TestClient(protected_app) as client:
+        unauthorized = client.get("/metrics")
+        authorized = client.get(
+            "/metrics",
+            headers={"Authorization": "Bearer operations-secret"},
+        )
+
+    assert unauthorized.status_code == 401
+    assert authorized.status_code == 200
+    assert "aihr_http_requests_total" in authorized.text
 
 
 def test_overview_supports_unified_filters_and_executive_metrics() -> None:

@@ -1,0 +1,34 @@
+groups:
+  - name: aihr
+    rules:
+      - alert: AihrApiP95LatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(aihr_http_request_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: AIHR API P95 latency is above 2 seconds
+
+      - alert: AihrRateLimited
+        expr: sum(rate(aihr_http_requests_total{status="429"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: AIHR or DeepSeek requests are being rate limited
+
+      - alert: AihrAssistantFailureRateHigh
+        expr: sum(rate(aihr_assistant_requests_total{outcome="error"}[10m])) / clamp_min(sum(rate(aihr_assistant_requests_total[10m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: AIHR assistant failure rate is above 5 percent
+
+      - alert: AihrContextCacheHitRateLow
+        expr: sum(rate(aihr_analysis_context_requests_total{cached="true"}[15m])) / clamp_min(sum(rate(aihr_analysis_context_requests_total[15m])), 0.001) < 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: AIHR analysis context cache hit rate is below 50 percent

@@ -11,6 +11,8 @@ from aihr.config import get_settings
 API_URL = get_settings().api_url.rstrip("/")
 ALL_OPTION = "全部"
 REQUEST_TIMEOUT_SECONDS = 60
+REQUEST_TIMEOUT = (3, REQUEST_TIMEOUT_SECONDS)
+HTTP_SESSION = requests.Session()
 
 
 class ApiError(RuntimeError):
@@ -20,10 +22,10 @@ class ApiError(RuntimeError):
 @st.cache_data(ttl=60, max_entries=128, show_spinner=False)
 def _get(path: str, params: dict[str, Any] | None = None) -> Any:
     try:
-        response = requests.get(
+        response = HTTP_SESSION.get(
             f"{API_URL}{path}",
             params=params,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
     except requests.RequestException as exc:
@@ -33,10 +35,10 @@ def _get(path: str, params: dict[str, Any] | None = None) -> Any:
 
 def _post(path: str, payload: dict[str, Any]) -> Any:
     try:
-        response = requests.post(
+        response = HTTP_SESSION.post(
             f"{API_URL}{path}",
             json=payload,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
     except requests.RequestException as exc:
@@ -56,6 +58,10 @@ def get_filters() -> dict:
 
 def get_overview(params: dict[str, Any]) -> dict:
     return _get("/overview", params=params)
+
+
+def get_dashboard_overview(params: dict[str, Any]) -> dict:
+    return _get("/dashboard/overview", params=params)
 
 
 def get_funnel(params: dict[str, Any]) -> list[dict]:
@@ -106,10 +112,10 @@ def stream_assistant(
     messages: list[dict[str, str]],
 ) -> Iterator[dict]:
     try:
-        response = requests.post(
+        response = HTTP_SESSION.post(
             f"{API_URL}/assistant/analyze/stream",
             json={"context": context, "messages": messages},
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=REQUEST_TIMEOUT,
             stream=True,
         )
         response.raise_for_status()

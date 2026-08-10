@@ -1,14 +1,16 @@
-FROM python:3.12-slim
+ARG RUNTIME_IMAGE=aihr-runtime:local
+FROM ${RUNTIME_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/opt/aihr:/opt/aihr/src
 
-WORKDIR /app
-COPY pyproject.toml README.md ./
+USER root
+WORKDIR /opt/aihr
 COPY src ./src
-COPY app ./app
 COPY config ./config
-RUN pip install --no-cache-dir .
+COPY app ./app
 
 EXPOSE 8501
 CMD ["streamlit", "run", "app/Home.py", "--server.address=0.0.0.0", "--server.port=8501"]

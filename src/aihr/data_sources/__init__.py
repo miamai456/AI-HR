@@ -1,2 +1,1 @@
-"""Data source import utilities."""
-
+"""Authorized external data source adapters."""

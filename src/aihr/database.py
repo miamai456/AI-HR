@@ -23,7 +23,12 @@ def create_engine_and_session(database_url: str) -> tuple[Engine, sessionmaker[S
         pool_options = {"poolclass": StaticPool} if database_path == ":memory:" else {}
     else:
         connect_args = {}
-        pool_options = {}
+        pool_options = {
+            "pool_size": 10,
+            "max_overflow": 20,
+            "pool_timeout": 10,
+            "pool_recycle": 1800,
+        }
 
     engine = create_engine(
         database_url,

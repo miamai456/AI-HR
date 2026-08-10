@@ -81,6 +81,7 @@ class Recommendation(Base):
         index=True,
     )
     source: Mapped[str] = mapped_column(String(16), index=True)
+    data_origin: Mapped[str] = mapped_column(String(32), default="synthetic", index=True)
     recommendation_score: Mapped[float] = mapped_column(Float)
     recommended_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -111,6 +112,7 @@ class FunnelEvent(Base):
     stage: Mapped[str] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(String(16), index=True)
     event_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    data_origin: Mapped[str] = mapped_column(String(32), default="synthetic", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

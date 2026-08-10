@@ -31,7 +31,7 @@ class MemoryJsonCache:
             cached = self._entries.get(key)
             if not cached:
                 return None
-            if now - cached[0] >= 0:
+            if cached[0] <= now:
                 self._entries.pop(key, None)
                 return None
             return cached[1]

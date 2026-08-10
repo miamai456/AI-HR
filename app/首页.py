@@ -6,11 +6,7 @@ import streamlit as st
 from app.api_client import (
     ApiError,
     build_query,
-    get_data_quality,
-    get_effectiveness,
-    get_monitoring_with_filters,
-    get_overview,
-    get_prediction_insights,
+    get_dashboard_overview,
 )
 from app.ui import (
     SEVERITY_LABELS,
@@ -67,21 +63,23 @@ if len(date_range) != 2:
 query = build_query(date_range, source, job_category, region, model_version, recruiter_team)
 
 try:
-    overview = get_overview(query)
-    effectiveness = get_effectiveness(query)
-    monitoring = get_monitoring_with_filters(query)
-    quality = get_data_quality(query)
-    prediction = get_prediction_insights(query)
+    dashboard_snapshot = get_dashboard_overview(query)
 except ApiError as exc:
     st.error(str(exc))
     st.stop()
+
+overview = dashboard_snapshot["overview"]
+effectiveness = dashboard_snapshot["effectiveness"]
+monitoring = dashboard_snapshot["monitoring"]
+quality = dashboard_snapshot["data_quality"]
+prediction = dashboard_snapshot.get("prediction", {})
 
 summary = overview["summary"]
 trend = pd.DataFrame(overview["trend"])
 alerts = pd.DataFrame(overview["open_alerts"])
 monitoring_rows = pd.DataFrame(monitoring["rows"])
 drift = pd.DataFrame(monitoring["drift_metrics"])
-segments = pd.DataFrame(prediction["segment_performance"])
+segments = pd.DataFrame(prediction.get("segment_performance", []))
 quality_summary = quality["summary"]
 
 adjusted_difference = effectiveness["adjusted_difference"]

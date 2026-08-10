@@ -12,6 +12,20 @@ import requests
 from aihr.services.cache import JsonCache
 
 LOGGER = logging.getLogger(__name__)
+CONTEXT_LIST_LIMITS = {
+    "trend": (6, True),
+    "open_alerts": (5, False),
+    "balance_diagnostics": (6, False),
+    "rows": (3, True),
+    "model_version_trends": (3, True),
+    "drift_metrics": (5, False),
+    "diagnostic_conclusions": (4, False),
+    "layers": (5, False),
+    "probability_bands": (8, False),
+    "top_features": (6, False),
+    "segment_performance": (4, False),
+    "anomaly_findings": (2, False),
+}
 SYSTEM_PROMPT = """
 你是 AIHR 招聘分析助手。只能基于提供的 JSON 上下文回答。
 必须区分事实、风险和建议，不得把相关性描述成因果关系。
@@ -64,18 +78,67 @@ class AssistantClient:
         self.sleep = sleep
         self.max_attempts = max_attempts
 
+    @staticmethod
+    def _limit_value(value: Any, *, depth: int = 0) -> Any:
+        if depth >= 5:
+            return value if isinstance(value, (str, int, float, bool, type(None))) else None
+        if isinstance(value, str):
+            return value[:1_000]
+        if isinstance(value, list):
+            return [
+                AssistantClient._limit_value(item, depth=depth + 1)
+                for item in value[:8]
+            ]
+        if isinstance(value, dict):
+            return {
+                str(key): AssistantClient._limit_value(item, depth=depth + 1)
+                for key, item in list(value.items())[:40]
+            }
+        return value
+
+    @classmethod
+    def _compact_context_data(cls, context: dict[str, Any]) -> dict[str, Any]:
+        compacted: dict[str, Any] = {}
+        for section_name, section_value in context.items():
+            if section_name in {"cached", "latency_ms"}:
+                continue
+            if not isinstance(section_value, dict):
+                compacted[section_name] = cls._limit_value(section_value)
+                continue
+
+            compacted_section: dict[str, Any] = {}
+            for key, value in section_value.items():
+                if section_name == "data_quality" and key == "checks" and isinstance(value, list):
+                    actionable = [
+                        item
+                        for item in value
+                        if isinstance(item, dict) and item.get("status") != "pass"
+                    ]
+                    selected = actionable[:5] or value[:3]
+                    compacted_section[key] = cls._limit_value(selected)
+                    continue
+                limit = CONTEXT_LIST_LIMITS.get(key)
+                if limit and isinstance(value, list):
+                    count, use_tail = limit
+                    selected = value[-count:] if use_tail else value[:count]
+                    compacted_section[key] = cls._limit_value(selected)
+                    continue
+                compacted_section[key] = cls._limit_value(value)
+            compacted[section_name] = compacted_section
+        compacted["context_compacted"] = True
+        return compacted
+
     def _compact_context(self, context: dict[str, Any]) -> str:
-        compact_context = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        if len(compact_context) > 30_000:
-            compact_context = compact_context[:30_000] + "\n...[context truncated]"
-        return compact_context
+        return json.dumps(
+            self._compact_context_data(context),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
     def analyze(
         self, context: dict[str, Any], messages: list[dict[str, str]]
     ) -> AssistantAnswer:
-        compact_context = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        if len(compact_context) > 30_000:
-            compact_context = compact_context[:30_000] + "\n...[上下文已截断]"
+        compact_context = self._compact_context(context)
         payload = {
             "model": self.model,
             "temperature": 0.3,

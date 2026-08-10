@@ -1,3 +1,5 @@
+import json
+
 import requests
 
 from aihr.services.assistant import (
@@ -52,6 +54,73 @@ def test_assistant_client_returns_structured_answer() -> None:
     assert result.total_tokens == 32
     assert calls[0][0] == "https://api.deepseek.com/chat/completions"
     assert calls[0][1]["json"]["response_format"] == {"type": "json_object"}
+
+
+def test_assistant_client_sends_compact_valid_analysis_context() -> None:
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"conclusion":"ok","evidence":[],"risks":[],'
+                                '"recommendations":[]}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs["json"])
+        return Response()
+
+    client = AssistantClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-chat",
+        post=fake_post,
+    )
+    context = {
+        "analysis_scope": {"filters": {"source": "ai"}},
+        "overview": {
+            "summary": {"recommended": 10_000},
+            "trend": [{"period": index} for index in range(20)],
+        },
+        "monitoring": {
+            "rows": [{"period": index, "payload": "x" * 2_000} for index in range(20)],
+            "diagnostic_conclusions": [{"severity": "high"} for _ in range(20)],
+        },
+        "data_quality": {
+            "summary": {"status": "warn"},
+            "checks": [
+                {"status": "pass", "name": "ok"},
+                *[{"status": "warn", "name": f"warn-{index}"} for index in range(20)],
+            ],
+        },
+        "prediction": {
+            "anomaly_findings": [{"id": index} for index in range(20)],
+            "top_features": [{"name": index} for index in range(20)],
+        },
+    }
+
+    client.analyze(context, [{"role": "user", "content": "analyze"}])
+
+    compact_message = captured["messages"][1]["content"]
+    compact_context = json.loads(compact_message.split("：", 1)[1])
+    assert compact_context["context_compacted"] is True
+    assert len(compact_context["overview"]["trend"]) == 6
+    assert compact_context["overview"]["trend"][0]["period"] == 14
+    assert len(compact_context["monitoring"]["rows"]) == 3
+    assert len(compact_context["data_quality"]["checks"]) == 5
+    assert len(compact_context["prediction"]["anomaly_findings"]) == 2
+    assert len(compact_message) < 15_000
 
 
 def test_assistant_client_retries_rate_limit_and_then_succeeds(monkeypatch) -> None:

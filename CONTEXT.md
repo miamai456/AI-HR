@@ -54,6 +54,14 @@ AIHR 是一个用于评估和监控 AI 招聘推荐效果的分析系统。当�
 
 ## Assistant Architecture
 
+- PostgreSQL is the production database; Alembic versions its schema and does not replace the
+  database engine.
+- RQ workers prewarm common analysis scopes through Redis, with a local-thread fallback.
+- Online operations endpoints require an operations Bearer token.
+- Prometheus evaluates API latency, 429, assistant failure, and cache-hit alerts; Grafana provides
+  the AIHR operations dashboard.
+- Persistent Compose data and deployment secrets are bound to E:\\AIHRData. Docker Desktop's
+  engine data location must be moved to E before the stack is started.
 - The assistant provider is DeepSeek and is called only by the FastAPI service.
 - Streamlit uses the internal assistant API and never receives the provider key.
 - Assistant responses use the structured fields `conclusion`, `evidence`, `risks`, and `recommendations`.

@@ -1,4 +1,4 @@
-from aihr.services.analytics import _rate
+from aihr.services.analytics_shared import rate as _rate
 
 
 def test_rate_handles_empty_denominator() -> None:
