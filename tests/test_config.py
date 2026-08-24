@@ -21,6 +21,19 @@ def test_environment_overrides_ini_file(monkeypatch) -> None:
     assert settings.database_url == "sqlite+pysqlite:///override.db"
 
 
+def test_postgresql_service_url_uses_installed_psycopg_driver(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "AIHR_DATABASE_URL",
+        "postgresql://cloud_user:cloud_password@postgres.internal:5432/aihr",
+    )
+
+    settings = load_settings(Path("config/config.Test.ini"))
+
+    assert settings.database_url == (
+        "postgresql+psycopg://cloud_user:cloud_password@postgres.internal:5432/aihr"
+    )
+
+
 def test_cache_and_prewarm_settings_can_be_injected(monkeypatch) -> None:
     monkeypatch.setenv("AIHR_CACHE_URL", "redis://cache:6379/0")
     monkeypatch.setenv("AIHR_ANALYSIS_PREWARM", "true")

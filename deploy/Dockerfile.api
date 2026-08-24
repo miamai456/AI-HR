@@ -1,0 +1,23 @@
+ARG PYTHON_BASE_IMAGE=python:3.12-slim
+FROM ${PYTHON_BASE_IMAGE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/opt/aihr/src
+
+USER root
+WORKDIR /opt/aihr
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+COPY pyproject.toml README.md alembic.ini ./
+COPY src ./src
+COPY config ./config
+COPY migrations ./migrations
+COPY docs ./docs
+RUN pip install --no-cache-dir .
+RUN useradd --create-home --uid 10001 aihr
+USER 10001
+
+EXPOSE 8000
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn aihr.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -52,7 +52,12 @@ class Settings(BaseModel):
     otel_service_name: str = "aihr-api"
 
     @model_validator(mode="after")
-    def resolve_file_secrets(self):
+    def resolve_runtime_settings(self):
+        url = make_url(self.database_url)
+        if url.drivername == "postgresql":
+            self.database_url = url.set(drivername="postgresql+psycopg").render_as_string(
+                hide_password=False
+            )
         if self.assistant_api_key_file:
             file_api_key = _read_secret_file(self.assistant_api_key_file)
             if file_api_key:

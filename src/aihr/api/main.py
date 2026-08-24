@@ -4,6 +4,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
@@ -17,6 +18,7 @@ from aihr import __version__
 from aihr.config import get_settings
 from aihr.database import Base, create_engine_and_session, get_db
 from aihr.schemas import (
+    AgentRequest,
     AssistantContextResponse,
     AssistantRequest,
     AssistantResponse,
@@ -42,6 +44,8 @@ from aihr.services.analytics_quality import get_data_quality
 from aihr.services.assistant import AssistantClient, AssistantService, AssistantServiceError
 from aihr.services.assistant_trust import apply_trust_guard, build_assistant_trust
 from aihr.services.cache import create_json_cache
+from aihr.services.controlled_agent import ControlledAnalysisAgent
+from aihr.services.knowledge import DocumentRetriever
 from aihr.services.metrics import MetricsRegistry
 from aihr.services.operations_auth import (
     load_operations_token,
@@ -77,6 +81,9 @@ def create_app(database_url: str | None = None) -> FastAPI:
     )
     snapshot_store = analysis_context_service.snapshot_store
     load_dataset_version = analysis_context_service.dataset_version_loader
+    docs_root = Path(__file__).resolve().parents[3] / "docs"
+    knowledge_retriever = DocumentRetriever(docs_root)
+    controlled_agent = ControlledAnalysisAgent(knowledge_retriever)
     assistant_service = None
     if settings.assistant_api_key and not settings.assistant_api_key.startswith("replace-with-"):
         assistant_service = AssistantService(
@@ -276,6 +283,25 @@ def create_app(database_url: str | None = None) -> FastAPI:
             "provider": settings.assistant_provider,
             "model": settings.assistant_model,
         }
+
+    @application.get("/api/v1/assistant/knowledge/search", tags=["assistant"])
+    def knowledge_search(
+        query: str = Query(min_length=2, max_length=2_000), top_k: int = 3
+    ) -> dict:
+        bounded_top_k = min(max(top_k, 1), 5)
+        results = [item.to_dict() for item in knowledge_retriever.search(query, bounded_top_k)]
+        return {"query": query, "results": results}
+
+    @application.post(
+        "/api/v1/assistant/agent/run",
+        tags=["assistant"],
+        dependencies=[Depends(operations_access)],
+    )
+    def run_controlled_agent(request: AgentRequest, session: DbSession) -> dict:
+        try:
+            return controlled_agent.run(request.question, session)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @application.get(
         "/api/v1/assistant/context",

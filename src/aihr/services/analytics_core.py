@@ -51,6 +51,7 @@ MONITORING_THRESHOLDS = {
     "score_drift": {"medium": 0.05, "high": 0.1},
 }
 EVENT_STAGE_ORDER = {
+    "recommended": 0,
     "contacted": 1,
     "replied": 2,
     "interviewed": 3,
@@ -58,7 +59,7 @@ EVENT_STAGE_ORDER = {
     "hired": 5,
 }
 VALID_SOURCES = {"ai", "human"}
-VALID_EVENT_STATUSES = {"completed", "skipped"}
+VALID_EVENT_STATUSES = {"completed", "skipped", "not_reached"}
 PREDICTION_MAX_RECORDS = 5000
 
 

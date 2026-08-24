@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+build/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
@@ -16,6 +17,8 @@ data/company/
 data/raw/
 exports/
 logs/
+debug.log
+scripts/_tmp_*.py
 .aihr_filter_state.json
 *.dump
 *.sql.gz

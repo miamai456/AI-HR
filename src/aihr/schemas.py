@@ -30,6 +30,10 @@ class AssistantRequest(BaseModel):
     force_refresh: bool = False
 
 
+class AgentRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=2_000)
+
+
 class AssistantTrust(BaseModel):
     sample_size: int = Field(ge=0)
     period_start: date | None = None
