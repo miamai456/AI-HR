@@ -29,6 +29,8 @@ class Settings(BaseModel):
     postgres_database: str = "aihr"
     postgres_user: str = "aihr"
     postgres_password: str = ""
+    mongo_url: str = ""
+    mongo_database: str = "aihr_documents"
     synthetic_seed_recommendations: int = 100_000
     synthetic_seed_candidates: int = 80_000
     synthetic_seed_jobs: int = 1_500
@@ -95,6 +97,8 @@ SECTION_KEY_ALIASES = {
     ("postgres", "database"): "postgres_database",
     ("postgres", "user"): "postgres_user",
     ("postgres", "password"): "postgres_password",
+    ("mongodb", "url"): "mongo_url",
+    ("mongodb", "database"): "mongo_database",
     ("synthetic", "seed_recommendations"): "synthetic_seed_recommendations",
     ("synthetic", "seed_candidates"): "synthetic_seed_candidates",
     ("synthetic", "seed_jobs"): "synthetic_seed_jobs",

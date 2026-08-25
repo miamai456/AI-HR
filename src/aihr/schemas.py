@@ -19,6 +19,31 @@ class ReadyResponse(BaseModel):
     checks: dict[str, str]
 
 
+class DocumentCreateRequest(BaseModel):
+    document_type: str = Field(pattern="^(resume|job|knowledge_chunk|conversation|tool_audit)$")
+    source_id: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=300)
+    content: str = Field(min_length=1, max_length=200_000)
+    metadata: dict = Field(default_factory=dict)
+
+
+class RecruitmentDocumentResponse(BaseModel):
+    document_id: str
+    document_type: str
+    source_id: str
+    title: str
+    content: str
+    metadata: dict
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocumentStoreHealthResponse(BaseModel):
+    status: str
+    backend: str
+    detail: str
+
+
 class AssistantMessage(BaseModel):
     role: str = Field(pattern="^(user|assistant)$")
     content: str = Field(min_length=1, max_length=8_000)

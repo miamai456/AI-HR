@@ -34,6 +34,7 @@ dependencies = [
   "opentelemetry-instrumentation-fastapi>=0.51b0,<1.0",
   "opentelemetry-instrumentation-requests>=0.51b0,<1.0",
   "sqlglot>=25.20,<27.0",
+  "pymongo>=4.10,<5.0",
 ]
 
 [project.optional-dependencies]

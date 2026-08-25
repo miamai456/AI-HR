@@ -24,6 +24,8 @@ from aihr.schemas import (
     AssistantResponse,
     AssistantStatusResponse,
     DataQualityResponse,
+    DocumentCreateRequest,
+    DocumentStoreHealthResponse,
     EffectivenessResponse,
     FilterOptions,
     FunnelRow,
@@ -32,6 +34,7 @@ from aihr.schemas import (
     OverviewResponse,
     PredictionInsightsResponse,
     ReadyResponse,
+    RecruitmentDocumentResponse,
 )
 from aihr.seed import SyntheticHiringConfig, seed_demo_metrics
 from aihr.services.analysis_prewarm import start_analysis_prewarm
@@ -45,6 +48,11 @@ from aihr.services.assistant import AssistantClient, AssistantService, Assistant
 from aihr.services.assistant_trust import apply_trust_guard, build_assistant_trust
 from aihr.services.cache import create_json_cache
 from aihr.services.controlled_agent import ControlledAnalysisAgent
+from aihr.services.document_store import (
+    DocumentStore,
+    RecruitmentDocument,
+    create_document_store,
+)
 from aihr.services.knowledge import DocumentRetriever
 from aihr.services.metrics import MetricsRegistry
 from aihr.services.operations_auth import (
@@ -62,7 +70,11 @@ def database_backend_for_url(database_url: str) -> str:
     return make_url(database_url).get_backend_name()
 
 
-def create_app(database_url: str | None = None) -> FastAPI:
+def create_app(
+    database_url: str | None = None,
+    *,
+    document_store: DocumentStore | None = None,
+) -> FastAPI:
     settings = get_settings()
     resolved_database_url = database_url or settings.database_url
     engine, session_factory = create_engine_and_session(resolved_database_url)
@@ -73,6 +85,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
     operations_token = load_operations_token(
         settings.operations_token,
         settings.operations_token_file,
+    )
+    resolved_document_store = document_store or create_document_store(
+        mongo_url=settings.mongo_url,
+        database_name=settings.mongo_database,
     )
     analysis_context_service = build_analysis_context_service(
         session_factory,
@@ -146,6 +162,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     application.state.cache_backend = shared_cache
     application.state.metrics = metrics
     application.state.prometheus_metrics = prometheus_metrics
+    application.state.document_store = resolved_document_store
     application.state.analysis_prewarm = start_analysis_prewarm(
         enabled=False,
         queue_enabled=False,
@@ -246,8 +263,83 @@ def create_app(database_url: str | None = None) -> FastAPI:
                     else "optional"
                 ),
                 "cache": getattr(shared_cache, "backend_name", "unknown"),
+                "documents": resolved_document_store.health().status,
             },
         }
+
+    def serialize_document(document: RecruitmentDocument) -> dict:
+        return {
+            "document_id": document.document_id,
+            "document_type": document.document_type,
+            "source_id": document.source_id,
+            "title": document.title,
+            "content": document.content,
+            "metadata": document.metadata,
+            "created_at": document.created_at,
+            "updated_at": document.updated_at,
+        }
+
+    @application.get(
+        "/api/v1/documents/status",
+        response_model=DocumentStoreHealthResponse,
+        tags=["documents"],
+    )
+    def document_store_status() -> dict:
+        status = resolved_document_store.health()
+        return {"status": status.status, "backend": status.backend, "detail": status.detail}
+
+    @application.get("/api/v1/documents/search", tags=["documents"])
+    def search_documents(
+        query: str = Query(min_length=2, max_length=2_000),
+        document_type: str | None = Query(
+            default=None,
+            pattern="^(resume|job|knowledge_chunk|conversation|tool_audit)$",
+        ),
+        limit: int = Query(default=10, ge=1, le=100),
+    ) -> dict:
+        try:
+            results = resolved_document_store.search(
+                query,
+                document_type=document_type,
+                limit=limit,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Document store is unavailable") from exc
+        return {
+            "query": query,
+            "results": [
+                {"document": serialize_document(result.document), "score": result.score}
+                for result in results
+            ],
+        }
+
+    @application.post(
+        "/api/v1/documents",
+        response_model=RecruitmentDocumentResponse,
+        status_code=201,
+        tags=["documents"],
+        dependencies=[Depends(operations_access)],
+    )
+    def create_document(request: DocumentCreateRequest) -> dict:
+        try:
+            document = resolved_document_store.save(**request.model_dump())
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Document store is unavailable") from exc
+        return serialize_document(document)
+
+    @application.get(
+        "/api/v1/documents/{document_id}",
+        response_model=RecruitmentDocumentResponse,
+        tags=["documents"],
+    )
+    def get_document(document_id: str) -> dict:
+        try:
+            document = resolved_document_store.get(document_id)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Document store is unavailable") from exc
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        return serialize_document(document)
 
     @application.get(
         "/api/v1/metrics/performance",
