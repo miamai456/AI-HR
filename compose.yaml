@@ -28,6 +28,19 @@ services:
       retries: 40
       start_period: 10s
 
+  mongo:
+    image: mongo:8.0
+    ports:
+      - "127.0.0.1:${AIHR_MONGO_HOST_PORT:-27017}:27017"
+    volumes:
+      - E:/AIHRData/mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
   api:
     image: aihr-api:local
     pull_policy: build
@@ -54,6 +67,9 @@ services:
       AIHR_ANALYSIS_QUEUE_NAME: aihr
       AIHR_DATABASE_URL: postgresql+psycopg://${AIHR_POSTGRES_USER:-aihr}@postgres:5432/${AIHR_POSTGRES_DATABASE:-aihr}
       AIHR_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+      AIHR_MONGO_URL: ${AIHR_MONGO_URL:-mongodb://mongo:27017}
+      AIHR_MONGO_DATABASE: ${AIHR_MONGO_DATABASE:-aihr_documents}
+      AIHR_CORS_ORIGINS: http://localhost:8501,http://localhost:${AIHR_FRONTEND_HOST_PORT:-5173}
       AIHR_OPERATIONS_TOKEN_FILE: /run/secrets/operations_token
       AIHR_OTEL_EXPORTER_ENDPOINT: http://otel-collector:4318
       AIHR_OTEL_SERVICE_NAME: aihr-api
@@ -67,6 +83,8 @@ services:
       postgres:
         condition: service_healthy
       cache:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/ready')"]
@@ -159,6 +177,25 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  frontend:
+    image: aihr-frontend:local
+    pull_policy: build
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_AIHR_API_URL: http://localhost:${AIHR_API_HOST_PORT:-8000}/api/v1
+    ports:
+      - "127.0.0.1:${AIHR_FRONTEND_HOST_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
       interval: 5s
       timeout: 5s
       retries: 20

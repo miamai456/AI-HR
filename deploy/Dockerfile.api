@@ -15,6 +15,7 @@ COPY src ./src
 COPY config ./config
 COPY migrations ./migrations
 COPY docs ./docs
+COPY scripts ./scripts
 RUN pip install --no-cache-dir .
 RUN useradd --create-home --uid 10001 aihr
 USER 10001
