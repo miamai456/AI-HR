@@ -13,7 +13,7 @@
 - 推荐效果下降时，问题更可能来自数据质量、流量结构、模型策略、顾问操作还是招聘流程？
 - 哪些推荐样本更可能转化，哪些异常样本值得进一步复盘？
 
-当前系统以 **FastAPI + PostgreSQL + SQLAlchemy + Streamlit** 构建，覆盖数据指标、效果评估、模型监控、数据质量和机器学习洞察等分析页面。
+当前系统以 **FastAPI + PostgreSQL + MongoDB + React/TypeScript + Streamlit** 构建：PostgreSQL承载招聘事实和指标数据，MongoDB承载脱敏后的简历、JD、知识分块、会话与工具审计文档；React工作台提供SSE流式问答、引用来源和执行链展示。
 
 ## 项目定位
 
@@ -129,31 +129,48 @@
 |---|---|
 | 后端 API | FastAPI, Pydantic |
 | 数据访问 | SQLAlchemy |
-| 数据库 | PostgreSQL |
-| 前端看板 | Streamlit, Plotly |
+| 结构化数据库 | PostgreSQL, SQLAlchemy, Alembic |
+| 非结构化文档 | MongoDB, PyMongo, Text Index, TTL Index |
+| 分析看板 | Streamlit, Plotly |
+| AI工作台 | React, TypeScript, Vite, SSE |
 | 数据处理 | pandas, NumPy |
 | 统计与机器学习 | scikit-learn, SciPy, statsmodels |
-| 工程验证 | pytest, ruff |
+| 工程验证 | pytest, Vitest, ruff, TypeScript |
+| 运维与监控 | Linux/Shell, Redis/RQ, Prometheus, Grafana, OpenTelemetry |
 | 容器化 | Docker Compose |
 
 ## 系统结构
 
 ```text
-Streamlit 前端看板
-  首页 / 漏斗 / 趋势 / 效果评估 / 监控 / 数据质量 / 机器学习洞察 / AI 分析助手
-        |
-        v
-FastAPI 分析 API
-  统一筛选、结构化响应、指标和模型结果接口
+Streamlit 分析看板                  React/TypeScript AI工作台
+  漏斗 / 趋势 / 效果评估             SSE回答 / 引用 / 执行链
+              \                     /
+               v                   v
+                 FastAPI 分析 API
+      指标接口 / 文档中心 / RAG / 受控Agent / SSE
         |
         v
 Analytics Service Layer
   漏斗分析、成熟窗口、IPTW、SMD、PSI、JSD、数据质量、转化预测、异常检测
-        |
-        v
-PostgreSQL + SQLAlchemy
-  维表、推荐事实表、漏斗事件表、数据集市表、原始职位市场数据
+        |                               |
+        v                               v
+PostgreSQL + SQLAlchemy               MongoDB + PyMongo
+  招聘事实 / 漏斗 / 数据集市            简历 / JD / 知识分块 / 审计日志
 ```
+
+## MongoDB文档中心与React工作台
+
+```powershell
+docker compose up --build -d mongo postgres cache api frontend
+docker compose exec -T api python scripts/index_knowledge_documents.py
+```
+
+- React工作台：`http://localhost:5173`
+- 文档中心状态：`http://localhost:8000/api/v1/documents/status`
+- 文档检索：`GET /api/v1/documents/search?query=招聘漏斗`
+- 文档写入：`POST /api/v1/documents`，在线环境受运维Bearer Token保护
+
+Linux或Git Bash可执行 `bash scripts/start-stack.sh` 完成启动、健康检查和知识分块初始化。MongoDB备份使用 `bash scripts/backup-mongodb.sh`，归档文件同时生成SHA-256校验值。
 
 ## 数据说明
 

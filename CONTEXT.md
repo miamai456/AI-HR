@@ -45,6 +45,16 @@ AIHR 是一个用于评估和监控 AI 招聘推荐效果的分析系统。当�
 - `app/` 包含 Streamlit 前端看板和 API 客户端。
 - `app/pages/6_机器学习洞察.py` 展示机器学习预测、解释、分群表现和异常发现。
 - `tests/` 包含 API、分析逻辑和种子数据的自动化测试。
+- `frontend/` 是React/TypeScript AI分析工作台，通过SSE消费服务端回答，并展示真实的文档检索引用和执行状态。
+- MongoDB文档中心保存脱敏后的简历、JD、知识分块、会话和工具审计；PostgreSQL仍是招聘事实与指标的唯一事实源。
+
+## Document Center Vocabulary
+
+- **Document center**: the FastAPI and MongoDB boundary for non-relational recruitment content.
+- **Source ID**: a stable external identifier linking a MongoDB document to a PostgreSQL entity or repository document anchor.
+- **Knowledge chunk**: a heading-bounded, citeable section indexed for document retrieval.
+- **Document-store degradation**: MongoDB is unavailable while PostgreSQL analytics and the API remain usable; `/api/v1/documents/status` reports the reason.
+- **Tool audit**: a time-limited record of controlled Agent tool activity. Conversation and tool-audit documents expire after 180 days; resumes, jobs, and knowledge chunks do not.
 
 ## 反馈命令
 
@@ -64,6 +74,10 @@ AIHR 是一个用于评估和监控 AI 招聘推荐效果的分析系统。当�
   engine data location must be moved to E before the stack is started.
 - The assistant provider is DeepSeek and is called only by the FastAPI service.
 - Streamlit uses the internal assistant API and never receives the provider key.
+- React/TypeScript uses the same FastAPI boundary and receives SSE events, never the provider key.
+- PostgreSQL owns structured hiring facts; MongoDB owns redacted non-structured documents and does not duplicate metric truth.
+- Document writes are idempotent on `(document_type, source_id)` and redact email, mainland mobile numbers, and national ID numbers before persistence.
+- MongoDB startup or runtime failures are surfaced as a degraded document-store status without replacing the PostgreSQL analytics path.
 - Assistant responses use the structured fields `conclusion`, `evidence`, `risks`, and `recommendations`.
 - The API owns retry, timeout, provider error mapping, short-lived response caching, and usage logging.
 - The API owns the trust envelope and forces low-confidence answers to exploratory findings.
